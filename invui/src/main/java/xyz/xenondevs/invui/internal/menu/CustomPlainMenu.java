@@ -1,13 +1,12 @@
 package xyz.xenondevs.invui.internal.menu;
 
 import org.bukkit.entity.Player;
-import xyz.xenondevs.invui.internal.util.InventoryUtils;
 
 /**
  * A packet-based generic menu.
  */
 public class CustomPlainMenu extends CustomContainerMenu {
-    
+
     /**
      * Creates a new {@link CustomPlainMenu} for the specified viewer by choosing
      * a generic menu type matching the specified width and height.
@@ -18,7 +17,6 @@ public class CustomPlainMenu extends CustomContainerMenu {
      * @throws IllegalArgumentException if there is no matching generic menu type
      */
     public CustomPlainMenu(int width, int height, Player player) {
-        super(InventoryUtils.getMatchingGenericMenuType(width, height), player);
+        super(MenuType.matchingGeneric(width, height), player);
     }
-    
 }

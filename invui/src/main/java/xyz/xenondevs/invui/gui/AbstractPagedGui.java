@@ -126,7 +126,7 @@ non-sealed abstract class AbstractPagedGui<C> extends AbstractGui implements Pag
     
     private void notifyWindowsOfContentListSlots() {
         for (Slot cls : contentListSlots) {
-            notifyWindows(convToIndex(cls));
+            notifyWindowsStructural(convToIndex(cls));
         }
     }
     

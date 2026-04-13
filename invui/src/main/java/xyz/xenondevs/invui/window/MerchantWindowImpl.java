@@ -137,6 +137,11 @@ final class MerchantWindowImpl extends AbstractSplitWindow<CustomMerchantMenu> i
         
         notifyUpdate(TRADES_RESEND_MAGIC_SLOT);
     }
+
+    @Override
+    protected void postItemInit() {
+        menu.prepareInitialTrades(activeTrades, getLevel(), getProgress(), isRestockMessageEnabled());
+    }
     
     @Override
     protected void unregisterAsViewer() {

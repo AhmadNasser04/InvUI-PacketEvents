@@ -546,6 +546,18 @@ non-sealed abstract class AbstractGui implements Gui {
             viewerAtSlot.notifyUpdate();
         }
     }
+
+    /**
+     * Notifies observers of a <em>structural</em> change at the given slot, i.e. one where the
+     * slot element itself was replaced (as opposed to its content being re-rendered). Window
+     * observers use this signal to invalidate their cached traversal path for the affected
+     * outer slot and skip the {@code checkTraverse} walk on subsequent plain content updates.
+     */
+    void notifyWindowsStructural(int index) {
+        for (var viewerAtSlot : observers.get(index)) {
+            viewerAtSlot.notifyStructuralUpdate();
+        }
+    }
     
     private void notifyWindowsOnBackgroundSlots() {
         for (int i = 0; i < getSize(); i++) {
@@ -698,8 +710,9 @@ non-sealed abstract class AbstractGui implements Gui {
             item.bind(this);
         }
         
-        // notify parents that a slot element has been changed
-        notifyWindows(index);
+        // notify parents that a slot element has been changed — structural signal so window
+        // observers invalidate the cached traversal path for the affected outer slot.
+        notifyWindowsStructural(index);
     }
     
     @Override

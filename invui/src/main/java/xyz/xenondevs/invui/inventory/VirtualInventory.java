@@ -1,7 +1,6 @@
 package xyz.xenondevs.invui.inventory;
 
 import org.bukkit.Bukkit;
-import org.bukkit.craftbukkit.util.CraftMagicNumbers;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -11,6 +10,7 @@ import xyz.xenondevs.invui.Click;
 import xyz.xenondevs.invui.InvUI;
 import xyz.xenondevs.invui.internal.util.DataUtils;
 import xyz.xenondevs.invui.internal.util.FakeInventoryView;
+import xyz.xenondevs.invui.internal.util.NmsBridge;
 import xyz.xenondevs.invui.util.ItemUtils;
 
 import java.io.*;
@@ -203,34 +203,49 @@ public final class VirtualInventory extends Inventory {
         UUID uuid = new UUID(din.readLong(), din.readLong());
         @Nullable ItemStack[] items;
         
-        byte id = din.readByte(); // id, pre v1.0: 3, v1.0: 4, v2.0: 5
+        byte id = din.readByte(); // id: pre v1.0 = 3, v1.0 = 4, v2.0 = 5 (NMS-only), v2.1 = 6
         switch (id) {
             case 3, 4 -> {
                 if (id == 3) {
                     // stack sizes are no longer serialized
                     DataUtils.readByteArray(din);
                 }
-                
+
                 items = Arrays.stream(DataUtils.read2DByteArray(din))
                     .map(data -> data.length != 0 ? ItemStack.deserializeBytes(data) : null)
                     .toArray(ItemStack[]::new);
             }
-            
+
+            case 6 -> {
+                int size = din.readInt();
+                var itemsMask = BitSet.valueOf(din.readNBytes((size + 7) / 8)); // ceil(size / 8)
+                var itemsIn = new DataInputStream(new BufferedInputStream(new GZIPInputStream(din)));
+
+                items = new ItemStack[size];
+                for (int i = 0; i < size; i++) {
+                    if (!itemsMask.get(i))
+                        continue;
+
+                    byte[] bytes = DataUtils.readByteArray(itemsIn);
+                    items[i] = ItemStack.deserializeBytes(bytes);
+                }
+            }
+
             case 5 -> {
                 int dataVersion = din.readInt();
                 int size = din.readInt();
                 var itemsMask = BitSet.valueOf(din.readNBytes((size + 7) / 8)); // ceil(size / 8)
                 var itemsIn = new BufferedInputStream(new GZIPInputStream(din));
-                
+
                 items = new ItemStack[size];
                 for (int i = 0; i < size; i++) {
                     if (!itemsMask.get(i))
                         continue;
-                    
-                    items[i] = DataUtils.deserializeItemStack(dataVersion, itemsIn);
+
+                    items[i] = NmsBridge.readV5Item(itemsIn, dataVersion);
                 }
             }
-            
+
             default -> throw new UnsupportedOperationException("Unsupported VirtualInventory version: " + id);
         }
         
@@ -267,28 +282,29 @@ public final class VirtualInventory extends Inventory {
         var dos = new DataOutputStream(out);
         dos.writeLong(uuid.getMostSignificantBits());
         dos.writeLong(uuid.getLeastSignificantBits());
-        dos.writeByte((byte) 5); // id, pre v1.0: 3, v1.0: 4, v2.0: 5
-        
-        dos.writeInt(CraftMagicNumbers.INSTANCE.getDataVersion());
+        dos.writeByte((byte) 6); // v2.1: Bukkit ItemStack#serializeAsBytes
+
         dos.writeInt(items.length);
-        
+
         var itemMask = new BitSet(items.length);
         var itemsBin = new ByteArrayOutputStream();
-        var itemsOut = new BufferedOutputStream(new GZIPOutputStream(itemsBin));
-        
+        var itemsOut = new DataOutputStream(new BufferedOutputStream(new GZIPOutputStream(itemsBin)));
+
         for (int i = 0; i < items.length; i++) {
             var itemStack = items[i];
             if (ItemUtils.isEmpty(itemStack))
                 continue;
-            
+
             itemMask.set(i, true);
-            DataUtils.serializeItemStack(itemStack, itemsOut);
+            byte[] bytes = itemStack.serializeAsBytes();
+            itemsOut.writeInt(bytes.length);
+            itemsOut.write(bytes);
         }
-        
+
         itemsOut.close();
         dos.write(Arrays.copyOf(itemMask.toByteArray(), (items.length + 7) / 8)); // ceil(size / 8)
         dos.write(itemsBin.toByteArray());
-        
+
         dos.flush();
     }
     

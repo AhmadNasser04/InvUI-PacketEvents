@@ -1,12 +1,11 @@
 package xyz.xenondevs.invui.internal.menu;
 
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.wrapper.PacketWrapper;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientSlotStateChange;
 import net.kyori.adventure.text.Component;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ServerGamePacketListener;
-import net.minecraft.network.protocol.game.ServerboundContainerSlotStateChangedPacket;
-import net.minecraft.world.inventory.MenuType;
-import net.minecraft.world.item.ItemStack;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.internal.network.PacketListener;
 
@@ -16,82 +15,76 @@ import java.util.function.BiConsumer;
  * A packet-based crafter menu.
  */
 public class CustomCrafterMenu extends CustomContainerMenu {
-    
+
     private @Nullable BiConsumer<? super Integer, ? super Boolean> slotStateChangeHandler;
-    
-    /**
-     * Creates a new custom crafter menu.
-     *
-     * @param player The player that will view this menu.
-     */
+
     public CustomCrafterMenu(Player player) {
         super(MenuType.CRAFTER_3x3, player);
     }
-    
+
     @Override
     public void open(Component title) {
-        var pl = PacketListener.getInstance();
-        pl.redirectIncoming(player, ServerboundContainerSlotStateChangedPacket.class, incoming);
-        
+        PacketListener.getInstance().redirectIncoming(
+            player,
+            PacketType.Play.Client.SLOT_STATE_CHANGE,
+            WrapperPlayClientSlotStateChange::new,
+            incoming
+        );
         super.open(title);
     }
-    
+
     @Override
     public void handleClosed() {
-        var pl = PacketListener.getInstance();
-        pl.removeRedirect(player, ServerboundContainerSlotStateChangedPacket.class);
-        
-        super.handleClosed();
+        handleClosed(InventoryCloseEvent.Reason.UNKNOWN);
     }
-    
+
     @Override
-    protected UpdateType processPacket(Packet<? super ServerGamePacketListener> packet) {
-        if (packet instanceof ServerboundContainerSlotStateChangedPacket slotStateChangedPacket) {
-            handleSlotStateChange(slotStateChangedPacket);
-            return UpdateType.NONE;
-        } else {
-            return super.processPacket(packet);
-        }
+    public void handleClosed(InventoryCloseEvent.Reason cause) {
+        PacketListener.getInstance().removeRedirect(player, PacketType.Play.Client.SLOT_STATE_CHANGE);
+        super.handleClosed(cause);
     }
-    
+
+    @Override
+    protected UpdateType processPacket(PacketWrapper<?> packet) {
+        if (packet instanceof WrapperPlayClientSlotStateChange slotStateChange) {
+            handleSlotStateChange(slotStateChange);
+            return UpdateType.NONE;
+        }
+        return super.processPacket(packet);
+    }
+
+    private void handleSlotStateChange(WrapperPlayClientSlotStateChange packet) {
+        if (packet.getWindowId() != containerId)
+            return;
+        int slot = packet.getSlot();
+        if (slot < 0 || slot >= dataSlots.length)
+            return;
+
+        int value = packet.isState() ? 0 : 1;
+        remoteDataSlots[slot] = value;
+        dataSlots[slot] = value;
+
+        if (slotStateChangeHandler != null)
+            slotStateChangeHandler.accept(slot, !packet.isState());
+    }
+
     /**
      * Returns whether the specified slot is disabled.
-     *
-     * @param slot The slot to check.
-     * @return Whether the slot is disabled.
      */
     public boolean isSlotDisabled(int slot) {
         return dataSlots[slot] == 1;
     }
-    
+
     /**
-     * Sets the state of the specified slot.
-     *
-     * @param slot  The slot to set the state of.
-     * @param state The new state of the slot.
+     * Sets the disabled state of the specified slot.
      */
     public void setSlotDisabled(int slot, boolean state) {
         dataSlots[slot] = state ? 1 : 0;
-        forceRemoteItem(slot, ItemStack.EMPTY);
+        markSlotDirty(slot);
     }
-    
-    /**
-     * Sets the slot state change handler.
-     *
-     * @param slotStateChangeHandler The slot state change handler.
-     */
-    public void setSlotStateChangeHandler(BiConsumer<? super Integer, ? super Boolean> slotStateChangeHandler) {
-        this.slotStateChangeHandler = slotStateChangeHandler;
+
+    public void setSlotStateChangeHandler(BiConsumer<? super Integer, ? super Boolean> handler) {
+        this.slotStateChangeHandler = handler;
     }
-    
-    private void handleSlotStateChange(ServerboundContainerSlotStateChangedPacket packet) {
-        int slot = packet.slotId();
-        int value = packet.newState() ? 0 : 1;
-        remoteDataSlots[slot] = value;
-        dataSlots[slot] = value;
-        
-        if (slotStateChangeHandler != null)
-            slotStateChangeHandler.accept(slot, !packet.newState());
-    }
-    
+
 }

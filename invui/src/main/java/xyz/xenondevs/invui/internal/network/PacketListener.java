@@ -1,211 +1,290 @@
 package xyz.xenondevs.invui.internal.network;
 
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPromise;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
-import net.minecraft.network.protocol.game.ClientboundBundlePacket;
-import net.minecraft.network.protocol.game.ServerGamePacketListener;
+import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketListenerPriority;
+import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
+import com.github.retrooper.packetevents.wrapper.PacketWrapper;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBundle;
 import org.bukkit.Bukkit;
-import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.InvUI;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
+import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.StreamSupport;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public class PacketListener implements Listener {
-    
-    private static final String MC_PACKET_HANDLER_NAME = "packet_handler";
+    private static final ExecutorService SEND_POOL = Executors.newFixedThreadPool(
+        Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+        new SendThreadFactory()
+    );
+
     private static final PacketListener INSTANCE = new PacketListener();
-    
-    private final String invuiPacketHandlerName;
-    private final Map<UUID, PacketHandler> packetHandlers = new ConcurrentHashMap<>();
-    
+
+    private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
+
     private PacketListener() {
-        invuiPacketHandlerName = "invui_packet_handler_" + InvUI.getInstance().getPlugin().getName();
-        Bukkit.getOnlinePlayers().forEach(this::injectChannelHandler);
+        PacketEvents.getAPI().getEventManager().registerListener(new Dispatcher());
         Bukkit.getPluginManager().registerEvents(this, InvUI.getInstance().getPlugin());
-        InvUI.getInstance().addDisableHandler(() -> Bukkit.getOnlinePlayers().forEach(this::removeChannelHandler));
+        Bukkit.getOnlinePlayers().forEach(player -> states.put(player.getUniqueId(), new PlayerState()));
+        InvUI.getInstance().addDisableHandler(() -> {
+            states.clear();
+            SEND_POOL.shutdown();
+            try {
+                SEND_POOL.awaitTermination(2, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        });
     }
-    
+
     public static PacketListener getInstance() {
         return INSTANCE;
     }
-    
-    public void discard(Player player, Class<? extends Packet<ClientGamePacketListener>> clazz) {
-        getPacketHandler(player.getUniqueId()).discardRules.add(clazz);
+
+    public void discard(Player player, PacketTypeCommon type) {
+        getState(player.getUniqueId()).discards.add(type);
     }
-    
-    public void stopDiscard(Player player, Class<? extends Packet<ClientGamePacketListener>> clazz) {
-        getPacketHandler(player.getUniqueId()).discardRules.remove(clazz);
+
+    public void stopDiscard(Player player, PacketTypeCommon type) {
+        getState(player.getUniqueId()).discards.remove(type);
     }
-    
-    public void injectOutgoing(Player player, List<Packet<? super ClientGamePacketListener>> packets) {
-        if (packets.isEmpty())
-            return;
-        injectOutgoing(player, new ClientboundBundlePacket(packets));
+
+    public void injectOutgoing(Player player, Supplier<? extends List<? extends PacketWrapper<?>>> wrapperSupplier) {
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) return;
+
+        state.sender.execute(() -> {
+            List<? extends PacketWrapper<?>> built;
+            try {
+                built = wrapperSupplier.get();
+            } catch (Throwable t) {
+                InvUI.getInstance().handleException("Failed to build packet bundle asynchronously", t);
+                return;
+            }
+            if (built == null || built.isEmpty()) return;
+            sendBundle(player, new ArrayList<>(built));
+        });
     }
-    
-    public void injectOutgoing(Player player, Packet<? super ClientGamePacketListener> packet) {
-        getPacketHandler(player.getUniqueId()).injectOutgoing(packet);
+
+    /** Sends a single wrapper, bypassing this listener's own send rules. */
+    public void injectOutgoing(Player player, PacketWrapper<?> wrapper) {
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) return;
+
+        state.sender.execute(() -> {
+            try {
+                PacketEvents.getAPI().getPlayerManager().sendPacketSilently(player, wrapper);
+            } catch (Throwable t) {
+                InvUI.getInstance().handleException("Failed to send packet asynchronously", t);
+            }
+        });
     }
-    
-    @SuppressWarnings("unchecked")
-    public <T extends Packet<? super ServerGamePacketListener>> void redirectIncoming(Player player, Class<? extends T> clazz, Queue<? super T> queue) {
-        getPacketHandler(player.getUniqueId()).redirections.put(clazz, (Queue<Packet<? super ServerGamePacketListener>>) queue);
+
+    private static void sendBundle(Player player, List<PacketWrapper<?>> wrappers) {
+        try {
+            var api = PacketEvents.getAPI();
+            var playerManager = api.getPlayerManager();
+            var protocolManager = api.getProtocolManager();
+            var channel = playerManager.getChannel(player);
+            if (channel == null) return;
+
+            var buffers = new ArrayList<>();
+            Collections.addAll(buffers, protocolManager.transformWrappers(new WrapperPlayServerBundle(), channel, true));
+            for (PacketWrapper<?> wrapper : wrappers) {
+                Collections.addAll(buffers, protocolManager.transformWrappers(wrapper, channel, true));
+            }
+            Collections.addAll(buffers, protocolManager.transformWrappers(new WrapperPlayServerBundle(), channel, true));
+            protocolManager.sendPacketsSilently(channel, buffers.toArray());
+        } catch (Throwable t) {
+            InvUI.getInstance().handleException("Failed to send packet bundle asynchronously", t);
+        }
     }
-    
-    public boolean removeRedirect(Player player, Class<? extends Packet<ServerGamePacketListener>> clazz) {
-        return getPacketHandler(player.getUniqueId()).redirections.remove(clazz) != null;
+
+    public <T extends PacketWrapper<?>> void redirectIncoming(
+        Player player,
+        PacketTypeCommon type,
+        Function<PacketReceiveEvent, T> factory,
+        Queue<? super T> queue
+    ) {
+        getState(player.getUniqueId()).redirects.put(type, new Entry<>(factory, queue));
     }
-    
-    @SuppressWarnings("unchecked")
-    public <T extends Packet<? super ServerGamePacketListener>> void listenIncoming(Player player, Class<? extends T> clazz, Queue<? super T> queue) {
-        getPacketHandler(player.getUniqueId()).listeners.put(clazz, (Queue<Packet<? super ServerGamePacketListener>>) queue);
+
+    public boolean removeRedirect(Player player, PacketTypeCommon type) {
+        return getState(player.getUniqueId()).redirects.remove(type) != null;
     }
-    
-    public boolean stopListening(Player player, Class<? extends Packet<? super ServerGamePacketListener>> clazz) {
-        return getPacketHandler(player.getUniqueId()).listeners.remove(clazz) != null;
+
+    public <T extends PacketWrapper<?>> void listenIncoming(
+        Player player,
+        PacketTypeCommon type,
+        Function<PacketReceiveEvent, T> factory,
+        Queue<? super T> queue
+    ) {
+        getState(player.getUniqueId()).listeners.put(type, new Entry<>(factory, queue));
     }
-    
-    private PacketHandler getPacketHandler(UUID uuid) {
-        var packetHandler = packetHandlers.get(uuid);
-        if (packetHandler == null)
+
+    public boolean stopListening(Player player, PacketTypeCommon type) {
+        return getState(player.getUniqueId()).listeners.remove(type) != null;
+    }
+
+    private PlayerState getState(UUID uuid) {
+        var state = states.get(uuid);
+        if (state == null)
             throw new IllegalStateException("No packet handler is registered for this player");
-        return packetHandler;
+        return state;
     }
-    
+
     @EventHandler(priority = EventPriority.LOWEST)
     private void handleJoin(PlayerJoinEvent event) {
-        injectChannelHandler(event.getPlayer());
+        states.put(event.getPlayer().getUniqueId(), new PlayerState());
     }
-    
+
     @EventHandler(priority = EventPriority.MONITOR)
     private void handleQuit(PlayerQuitEvent event) {
-        packetHandlers.remove(event.getPlayer().getUniqueId());
+        states.remove(event.getPlayer().getUniqueId());
     }
-    
-    private void injectChannelHandler(Player player) {
-        if (packetHandlers.containsKey(player.getUniqueId()))
-            throw new IllegalStateException("A packet handler is already registered for this player");
-        
-        var channel = ((CraftPlayer) player).getHandle().connection.connection.channel;
-        var packetHandler = new PacketHandler(player, channel);
-        packetHandlers.put(player.getUniqueId(), packetHandler);
-        channel.pipeline().addBefore(MC_PACKET_HANDLER_NAME, invuiPacketHandlerName, packetHandler);
-    }
-    
-    private void removeChannelHandler(Player player) {
-        packetHandlers.remove(player.getUniqueId());
-        var channel = ((CraftPlayer) player).getHandle().connection.connection.channel;
-        
-        try {
-            channel.pipeline().remove(invuiPacketHandlerName);
-        } catch (NoSuchElementException ignored) {
-            // On server shutdown, the handler may have already been removed.
-            // Checking whether the handler is still present before removing it
-            // could cause a race condition, so we just catch the exception instead.
+
+    private record Entry<T extends PacketWrapper<?>>(
+        Function<PacketReceiveEvent, T> factory,
+        Queue<? super T> queue
+    ) {
+        void dispatch(PacketReceiveEvent event) {
+            queue.add(factory.apply(event));
         }
     }
-    
-    private static class PacketHandler extends ChannelDuplexHandler {
-        
-        private final Map<Class<? extends Packet<? super ServerGamePacketListener>>, Queue<Packet<? super ServerGamePacketListener>>> redirections = new ConcurrentHashMap<>();
-        private final Map<Class<? extends Packet<? super ServerGamePacketListener>>, Queue<Packet<? super ServerGamePacketListener>>> listeners = new ConcurrentHashMap<>();
-        private final Set<Class<? extends Packet<ClientGamePacketListener>>> discardRules = Collections.newSetFromMap(new ConcurrentHashMap<>());
-        private final Player player;
-        private final Channel channel;
-        
-        public PacketHandler(Player player, Channel channel) {
-            this.player = player;
-            this.channel = channel;
+
+    private static final class PlayerState {
+        final Set<PacketTypeCommon> discards = Collections.newSetFromMap(new ConcurrentHashMap<>());
+        @SuppressWarnings("rawtypes")
+        final Map<PacketTypeCommon, Entry> redirects = new ConcurrentHashMap<>();
+        @SuppressWarnings("rawtypes")
+        final Map<PacketTypeCommon, Entry> listeners = new ConcurrentHashMap<>();
+        final SerialExecutor sender = new SerialExecutor(SEND_POOL);
+    }
+
+    private static final class SerialExecutor {
+        private final Executor delegate;
+        private final ConcurrentLinkedQueue<Runnable> tasks = new ConcurrentLinkedQueue<>();
+        private final AtomicBoolean active = new AtomicBoolean(false);
+
+        SerialExecutor(Executor delegate) {
+            this.delegate = delegate;
         }
-        
-        public void injectOutgoing(Packet<? super ClientGamePacketListener> packet) {
-            if (!channel.eventLoop().inEventLoop()) {
-                channel.eventLoop().execute(() -> injectOutgoing(packet));
-                return;
+
+        void execute(Runnable task) {
+            tasks.add(task);
+            schedule();
+        }
+
+        private void schedule() {
+            if (active.compareAndSet(false, true)) {
+                try {
+                    delegate.execute(this::drain);
+                } catch (Throwable t) {
+                    active.set(false);
+                    throw t;
+                }
             }
-            
+        }
+
+        private void drain() {
             try {
-                // This is a workaround for "promise.channel does not match: com.comphenix.protocol.injector.netty.channel.NettyChannelProxy"
-                // If ProtocolLib is installed, this.channel is a proxy channel that delegates to the real channel.
-                // Using channel.newPromise(), we can obtain a promise bound to the real channel. Otherwise, netty will throw this exception.
-                var channelForPromise = channel.newPromise().channel();
-                
-                channel.writeAndFlush(packet, new ForceChannelPromise(channelForPromise));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-        
-        @SuppressWarnings("unchecked")
-        @Override
-        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
-            if (msg instanceof Packet<?> packet && !(promise instanceof ForceChannelPromise)) {
-                if (packet instanceof ClientboundBundlePacket bundle) {
-                    var subPackets = StreamSupport.stream(bundle.subPackets().spliterator(), false)
-                        .<Packet<? super ClientGamePacketListener>>map(this::singleWrite)
-                        .filter(Objects::nonNull)
-                        .toList();
-                    
-                    if (subPackets.isEmpty()) {
-                        promise.setSuccess();
-                    } else {
-                        ctx.write(new ClientboundBundlePacket(subPackets), promise);
-                    }
-                } else {
-                    var newPacket = singleWrite((Packet<ClientGamePacketListener>) packet);
-                    if (newPacket == null) {
-                        promise.setSuccess();
-                    } else {
-                        ctx.write(newPacket, promise);
+                Runnable task;
+                while ((task = tasks.poll()) != null) {
+                    try {
+                        task.run();
+                    } catch (Throwable t) {
+                        InvUI.getInstance().handleException("Packet sender task failed", t);
                     }
                 }
-            } else {
-                ctx.write(msg, promise);
+            } finally {
+                active.set(false);
+            }
+            if (!tasks.isEmpty()) {
+                schedule();
             }
         }
-        
-        private @Nullable <P extends Packet<? super ClientGamePacketListener>> P singleWrite(P packet) {
-            if (discardRules.contains(packet.getClass())) {
-                return null;
-            } else {
-                return packet;
-            }
-        }
-        
-        @SuppressWarnings("unchecked")
-        @Override
-        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-            if (!(msg instanceof Packet<?> packet)) {
-                super.channelRead(ctx, msg);
-                return;
-            }
-            
-            var listener = listeners.get(packet.getClass());
-            if (listener != null) {
-                listener.add((Packet<ServerGamePacketListener>) packet);
-            }
-            
-            var queue = redirections.get(packet.getClass());
-            if (queue != null) {
-                queue.add((Packet<ServerGamePacketListener>) packet);
-            } else {
-                super.channelRead(ctx, packet);
-            }
-        }
-        
     }
-    
+
+    private static final class SendThreadFactory implements ThreadFactory {
+        private final AtomicInteger counter = new AtomicInteger();
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(r, "InvUI-PacketSender-" + counter.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        }
+    }
+
+    private final class Dispatcher extends PacketListenerAbstract {
+        Dispatcher() {
+            super(PacketListenerPriority.HIGH);
+        }
+
+        @Override
+        public void onPacketSend(PacketSendEvent event) {
+            if (!(event.getPlayer() instanceof Player player))
+                return;
+            PlayerState state = states.get(player.getUniqueId());
+            if (state == null)
+                return;
+            if (state.discards.contains(event.getPacketType())) {
+                event.setCancelled(true);
+            }
+        }
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        @Override
+        public void onPacketReceive(PacketReceiveEvent event) {
+            if (!(event.getPlayer() instanceof Player player))
+                return;
+            PlayerState state = states.get(player.getUniqueId());
+            if (state == null)
+                return;
+            PacketTypeCommon type = event.getPacketType();
+
+            Entry listener = state.listeners.get(type);
+            if (listener != null) {
+                try {
+                    listener.dispatch(event);
+                } catch (Throwable t) {
+                    InvUI.getInstance().handleException("Failed to dispatch listened packet " + type, t);
+                }
+            }
+
+            Entry redirect = state.redirects.get(type);
+            if (redirect != null) {
+                try {
+                    redirect.dispatch(event);
+                } catch (Throwable t) {
+                    InvUI.getInstance().handleException("Failed to dispatch redirected packet " + type, t);
+                }
+                event.setCancelled(true);
+            }
+        }
+    }
 }

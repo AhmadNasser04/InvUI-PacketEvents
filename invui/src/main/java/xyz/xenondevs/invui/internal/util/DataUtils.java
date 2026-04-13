@@ -14,15 +14,22 @@ import org.bukkit.inventory.ItemStack;
 
 import java.io.*;
 
-public class DataUtils {
-    
+/**
+ * Low-level binary I/O helpers used by {@link xyz.xenondevs.invui.inventory.VirtualInventory}
+ * serialization. NMS-backed NBT serialization was removed in favour of
+ * {@link org.bukkit.inventory.ItemStack#serializeAsBytes()} (Bukkit public API).
+ */
+public final class DataUtils {
+
+    private DataUtils() {}
+
     public static byte[] readByteArray(DataInputStream din) throws IOException {
         int size = din.readInt();
         byte[] array = new byte[size];
         din.readFully(array);
         return array;
     }
-    
+
     public static byte[][] read2DByteArray(DataInputStream din) throws IOException {
         int size2d = din.readInt();
         byte[][] array2d = new byte[size2d][];
@@ -31,7 +38,7 @@ public class DataUtils {
         }
         return array2d;
     }
-    
+
     /**
      * Serializes the given {@link ItemStack} and writes it to the given {@link OutputStream}.
      *
@@ -51,7 +58,7 @@ public class DataUtils {
             throw new RuntimeException(e);
         }
     }
-    
+
     /**
      * Deserializes an {@link ItemStack} from the given {@link InputStream} and applies data fixes if necessary.
      *
@@ -67,7 +74,7 @@ public class DataUtils {
                 new Dynamic<>(NbtOps.INSTANCE, tag),
                 dataVersion, CraftMagicNumbers.INSTANCE.getDataVersion()
             ).getValue();
-            
+
             return net.minecraft.world.item.ItemStack.CODEC.parse(
                 MinecraftServer.getServer()
                     .registryAccess()
@@ -78,5 +85,4 @@ public class DataUtils {
             throw new RuntimeException(e);
         }
     }
-    
 }

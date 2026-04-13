@@ -2,11 +2,8 @@ package xyz.xenondevs.invui.internal.util;
 
 import io.papermc.paper.datacomponent.DataComponentType;
 import io.papermc.paper.datacomponent.DataComponentTypes;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.item.component.BundleContents;
 import org.bukkit.Material;
 import org.bukkit.Registry;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.inventory.ItemStack;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.util.ItemUtils;
@@ -62,7 +59,9 @@ public class ItemUtils2 {
     
     
     /**
-     * Adds the given target stack to the given bundle stack, updating both stacks appropriately.
+     * Adds the given target stack to the given bundle stack, updating both
+     * stacks appropriately. The vanilla weight formula ({@code sum(amount *
+     * 64 / maxStackSize) <= 64}) is applied.
      *
      * @param bundle the bundle item stack
      * @param target the target item stack
@@ -71,22 +70,49 @@ public class ItemUtils2 {
     public static boolean tryMoveIntoBundle(ItemStack bundle, ItemStack target) {
         if (ItemUtils.isEmpty(target))
             return false;
-        
-        var nmsBundle = CraftItemStack.unwrap(bundle);
-        var bundleContents = nmsBundle.get(DataComponents.BUNDLE_CONTENTS);
-        if (bundleContents == null)
+
+        var contents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        if (contents == null)
             return false;
-        
-        var nmsTarget = CraftItemStack.unwrap(target);
-        var mutableBundleContents = new BundleContents.Mutable(bundleContents);
-        int added = mutableBundleContents.tryInsert(nmsTarget);
-        
-        if (added != 0) {
-            nmsBundle.set(DataComponents.BUNDLE_CONTENTS, mutableBundleContents.toImmutable());
-            return true;
+
+        int maxToAdd = getMaxAmountToAddToBundle(bundle, target);
+        if (maxToAdd <= 0)
+            return false;
+
+        var newList = new ArrayList<>(contents.contents());
+        int remaining = Math.min(target.getAmount(), maxToAdd);
+        int added = 0;
+
+        // try to merge with an existing matching stack first
+        for (int i = 0; i < newList.size() && remaining > 0; i++) {
+            var existing = newList.get(i);
+            if (existing.isSimilar(target)) {
+                int headroom = existing.getMaxStackSize() - existing.getAmount();
+                if (headroom > 0) {
+                    int merge = Math.min(remaining, headroom);
+                    var merged = existing.clone();
+                    merged.setAmount(existing.getAmount() + merge);
+                    newList.set(i, merged);
+                    remaining -= merge;
+                    added += merge;
+                }
+            }
         }
-        
-        return false;
+
+        // spill the rest into a new stack
+        if (remaining > 0) {
+            var fresh = target.clone();
+            fresh.setAmount(remaining);
+            newList.add(fresh);
+            added += remaining;
+        }
+
+        if (added == 0)
+            return false;
+
+        bundle.setData(DataComponentTypes.BUNDLE_CONTENTS, bundleContents(newList));
+        target.setAmount(target.getAmount() - added);
+        return true;
     }
     
     /**
@@ -116,23 +142,32 @@ public class ItemUtils2 {
     }
     
     /**
-     * Gets the maximum amount of items from the given target stack that can be added to the given bundle.
-     *
-     * @param bundle The bundle item stack
-     * @param target The target item stack
-     * @return The maximum amount of items from the target stack that can be added to the bundle
+     * Gets the maximum amount of items from {@code target} that can fit into
+     * {@code bundle} according to the vanilla bundle weight formula.
      */
     public static int getMaxAmountToAddToBundle(ItemStack bundle, ItemStack target) {
         if (ItemUtils.isEmpty(target))
             return 0;
-        
-        var nmsBundle = CraftItemStack.unwrap(bundle);
-        var bundleContents = nmsBundle.get(DataComponents.BUNDLE_CONTENTS);
-        if (bundleContents == null)
+
+        var contents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        if (contents == null)
             return 0;
-        
-        var nmsTarget = CraftItemStack.unwrap(target);
-        return Math.min(target.getAmount(), bundleContents.getMaxAmountToAdd(nmsTarget));
+
+        // Vanilla weight: each item's weight = 64 / maxStackSize. Bundle capacity = 64.
+        int usedWeight = 0;
+        for (var stack : contents.contents()) {
+            int perItem = 64 / Math.max(1, stack.getMaxStackSize());
+            usedWeight += stack.getAmount() * perItem;
+        }
+        int remainingWeight = 64 - usedWeight;
+        if (remainingWeight <= 0)
+            return 0;
+
+        int perTargetWeight = 64 / Math.max(1, target.getMaxStackSize());
+        if (perTargetWeight <= 0)
+            return target.getAmount();
+
+        return Math.min(target.getAmount(), remainingWeight / perTargetWeight);
     }
     
     /**
@@ -186,41 +221,15 @@ public class ItemUtils2 {
         return amountLeft;
     }
     
-    /**
-     * Removes the selected item stack from the given bundle item stack and returns it.
-     *
-     * @param bundle the bundle item stack
-     * @return the item stack that was removed from the bundle, or null if the
-     * bundle is empty or this item stack does not have the bundle contents data component
-     */
     public static @Nullable ItemStack takeSelectedFromBundle(ItemStack bundle) {
-        var nmsBundle = CraftItemStack.unwrap(bundle);
-        var bundleContents = nmsBundle.get(DataComponents.BUNDLE_CONTENTS);
-        if (bundleContents != null && !bundleContents.isEmpty()) {
-            var items = new ArrayList<>(bundleContents.items());
-            int i = Math.clamp(bundleContents.getSelectedItemIndex(), 0, bundleContents.size());
-            var taken = items.remove(i);
-            nmsBundle.set(DataComponents.BUNDLE_CONTENTS, new BundleContents(items));
-            return CraftItemStack.asCraftMirror(taken.create());
-        }
-        
-        return null;
+        return NmsBridge.takeBundleSelected(bundle);
     }
-    
+
     /**
-     * Sets the selected bundle slot of the given bundle item stack.
-     *
-     * @param bundle     the bundle item stack
-     * @param bundleSlot the selected bundle slot
+     * Sets the selected bundle slot.
      */
     public static void setSelectedBundleSlot(ItemStack bundle, int bundleSlot) {
-        var nmsBundle = CraftItemStack.unwrap(bundle);
-        var bundleContents = nmsBundle.get(DataComponents.BUNDLE_CONTENTS);
-        if (bundleContents != null) {
-            var mutableBundleContents = new BundleContents.Mutable(bundleContents);
-            mutableBundleContents.toggleSelectedItem(bundleSlot);
-            nmsBundle.set(DataComponents.BUNDLE_CONTENTS, mutableBundleContents.toImmutable());
-        }
+        NmsBridge.setBundleSelectedIndex(bundle, bundleSlot);
     }
     
     /**

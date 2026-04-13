@@ -9,25 +9,29 @@ plugins {
 val libs = the<LibrariesForLibs>()
 
 group = "xyz.xenondevs.invui"
-version = "2.0.0-RC.2"
+version = "2.0.0-RC.2-PacketEvents"
 
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://repo.codemc.io/repository/maven-releases/")
     maven("https://jitpack.io")
 }
 
 dependencies {
     paperweight.paperDevBundle(libs.versions.paper.get())
+
+    compileOnly(libs.packetevents.spigot)
     implementation(libs.jetbrains.annotations)
     implementation(libs.jspecify)
-    
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platformLauncher)
     testImplementation(libs.mockbukkit)
     testImplementation(libs.logback.classic)
     testImplementation(libs.test.paper.api)
+    testImplementation(libs.packetevents.spigot)
 }
 
 java {
@@ -50,10 +54,11 @@ tasks {
 publishing {
     repositories {
         maven {
+            name = "nexus-public"
+            url = uri("https://repo.striveservices.org/nexus-public")
             credentials {
-                name = "xenondevs"
-                url = uri { "https://repo.xenondevs.xyz/releases/" }
-                credentials(PasswordCredentials::class)
+                username = "Panda"
+                password = System.getenv("PANDA_TOKEN")
             }
         }
     }

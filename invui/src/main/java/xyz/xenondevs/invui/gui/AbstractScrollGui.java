@@ -176,7 +176,7 @@ non-sealed abstract class AbstractScrollGui<C> extends AbstractGui implements Sc
     
     private void notifyWindowsOfContentListSlots() {
         for (Slot cls : contentListSlots) {
-            notifyWindows(convToIndex(cls));
+            notifyWindowsStructural(convToIndex(cls));
         }
     }
     

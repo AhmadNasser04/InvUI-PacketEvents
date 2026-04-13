@@ -1,5 +1,7 @@
 package xyz.xenondevs.invui;
 
+import com.github.retrooper.packetevents.PacketEvents;
+import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import io.papermc.paper.plugin.provider.classloader.ConfiguredPluginClassLoader;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
@@ -10,6 +12,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 
 /**
@@ -31,6 +34,7 @@ public final class InvUI implements Listener {
     
     private final List<Runnable> disableHandlers = new ArrayList<>();
     private @Nullable Plugin plugin;
+    private boolean ownsPacketEvents;
     private BiConsumer<? super String, ? super Throwable> exceptionHandler = (msg, e) -> getPlugin().getComponentLogger().error(msg, e);
     private boolean fireBukkitInventoryEvents = true;
     
@@ -89,12 +93,46 @@ public final class InvUI implements Listener {
     public void setPlugin(@Nullable Plugin plugin) {
         if (this.plugin != null)
             throw new IllegalStateException("Plugin is already set");
-        
+
         if (plugin == null)
             return;
-        
+
         Bukkit.getPluginManager().registerEvents(this, plugin);
         this.plugin = plugin;
+        bootstrapPacketEvents(plugin);
+    }
+
+    /**
+     * Ensures PacketEvents is available. If a host plugin has already
+     * initialized PacketEvents, reuses that instance; otherwise builds,
+     * loads and initializes a library-owned instance tied to {@code plugin}
+     * and records ownership so it can be terminated on plugin disable.
+     */
+    @SuppressWarnings("ConstantValue") // PacketEvents.getAPI() can return null until setAPI() is called
+    private void bootstrapPacketEvents(Plugin plugin) {
+        try {
+            var existing = PacketEvents.getAPI();
+            if (existing == null) {
+                // No host plugin owns PacketEvents — InvUI bootstraps its own
+                // instance tied to the supplied plugin and will tear it down
+                // on plugin disable.
+                PacketEvents.setAPI(SpigotPacketEventsBuilder.build(plugin));
+                ownsPacketEvents = true;
+                var api = PacketEvents.getAPI();
+                if (!api.isLoaded()) {
+                    api.load();
+                }
+                if (!api.isInitialized()) {
+                    api.init();
+                }
+            }
+        } catch (Throwable t) {
+            plugin.getComponentLogger().warn(
+                "InvUI could not bootstrap PacketEvents on this server (likely a test or non-Paper environment); " +
+                "window-opening features will be unavailable until it is initialized manually.",
+                t
+            );
+        }
     }
     
     /**
@@ -129,9 +167,7 @@ public final class InvUI implements Listener {
      * @return Whether Bukkit's inventory events should be fired for interactions with InvUI inventories.
      */
     public boolean isFireBukkitInventoryEvents() {
-        if (FIRE_BUKKIT_INVENTORY_EVENTS_OVERRIDE != null)
-            return FIRE_BUKKIT_INVENTORY_EVENTS_OVERRIDE;
-        return fireBukkitInventoryEvents;
+        return Objects.requireNonNullElseGet(FIRE_BUKKIT_INVENTORY_EVENTS_OVERRIDE, () -> fireBukkitInventoryEvents);
     }
     
     /**
@@ -163,6 +199,9 @@ public final class InvUI implements Listener {
     private void handlePluginDisable(PluginDisableEvent event) {
         if (event.getPlugin().equals(plugin)) {
             disableHandlers.forEach(Runnable::run);
+            if (ownsPacketEvents && !PacketEvents.getAPI().isTerminated()) {
+                PacketEvents.getAPI().terminate();
+            }
         }
     }
     

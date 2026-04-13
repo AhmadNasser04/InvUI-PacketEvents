@@ -4,6 +4,7 @@ import com.google.common.collect.Sets;
 import io.papermc.paper.datacomponent.DataComponentBuilder;
 import io.papermc.paper.datacomponent.DataComponentType;
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.CustomModelData;
 import io.papermc.paper.datacomponent.item.ItemLore;
 import io.papermc.paper.datacomponent.item.TooltipDisplay;
 import it.unimi.dsi.fastutil.booleans.BooleanArrayList;
@@ -18,11 +19,8 @@ import net.kyori.adventure.text.format.StyleBuilderApplicable;
 import net.kyori.adventure.text.minimessage.tag.TagPattern;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.item.component.CustomModelData;
 import org.bukkit.Color;
 import org.bukkit.Material;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.ItemType;
 import org.jspecify.annotations.Nullable;
@@ -110,12 +108,12 @@ public final class ItemBuilder implements ItemProvider {
                 .collect(Collectors.toCollection(ArrayList::new));
         }
         
-        CustomModelData cmd = CraftItemStack.unwrap(base).get(DataComponents.CUSTOM_MODEL_DATA);
+        CustomModelData cmd = base.getData(DataComponentTypes.CUSTOM_MODEL_DATA);
         if (cmd != null) {
             customModelDataFloats = new FloatArrayList(cmd.floats());
             customModelDataBooleans = new BooleanArrayList(cmd.flags());
             customModelDataStrings = new ArrayList<>(cmd.strings());
-            customModelDataColors = new IntArrayList(cmd.colors());
+            customModelDataColors = new IntArrayList(cmd.colors().stream().mapToInt(Color::asRGB).toArray());
         }
     }
     
@@ -191,15 +189,20 @@ public final class ItemBuilder implements ItemProvider {
             || customModelDataStrings != null
             || customModelDataColors != null
         ) {
-            CraftItemStack.unwrap(itemStack).set(
-                DataComponents.CUSTOM_MODEL_DATA,
-                new CustomModelData(
-                    customModelDataFloats != null ? new FloatArrayList(customModelDataFloats) : new FloatArrayList(),
-                    customModelDataBooleans != null ? new BooleanArrayList(customModelDataBooleans) : new BooleanArrayList(),
-                    customModelDataStrings != null ? new ArrayList<>(customModelDataStrings) : new ArrayList<>(),
-                    customModelDataColors != null ? new IntArrayList(customModelDataColors) : new IntArrayList()
-                )
-            );
+            var cmdBuilder = CustomModelData.customModelData();
+            if (customModelDataFloats != null)
+                cmdBuilder.addFloats(customModelDataFloats);
+            if (customModelDataBooleans != null)
+                cmdBuilder.addFlags(customModelDataBooleans);
+            if (customModelDataStrings != null)
+                cmdBuilder.addStrings(customModelDataStrings);
+            if (customModelDataColors != null) {
+                var colorList = customModelDataColors.intStream()
+                    .mapToObj(Color::fromARGB)
+                    .toList();
+                cmdBuilder.addColors(colorList);
+            }
+            itemStack.setData(DataComponentTypes.CUSTOM_MODEL_DATA, cmdBuilder.build());
         }
         
         if (modifiers != null) {

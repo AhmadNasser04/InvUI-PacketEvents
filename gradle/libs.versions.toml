@@ -2,6 +2,7 @@
 kotlin = "2.3.10"
 paper = "26.1.1.+"
 testpaper = "1.21.11-R0.1-SNAPSHOT"
+packetevents = "2.12.0"
 
 [libraries]
 commons-provider = { module = "xyz.xenondevs.commons:commons-provider", version = "2.0.0-alpha.9" }
@@ -15,6 +16,7 @@ kotlin-test-junit = { group = "org.jetbrains.kotlin", name = "kotlin-test-junit"
 mockbukkit = { module = "org.mockbukkit.mockbukkit:mockbukkit-v1.21", version = "4.106.1" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.21" }
 paperweight-userdev-plugin = { module = "io.papermc.paperweight:paperweight-userdev", version = "2.0.0-beta.21" }
+packetevents-spigot = { module = "com.github.retrooper:packetevents-spigot", version.ref = "packetevents" }
 test-paper-api = { module = "io.papermc.paper:paper-api", version.ref = "testpaper" }
 
 [plugins]

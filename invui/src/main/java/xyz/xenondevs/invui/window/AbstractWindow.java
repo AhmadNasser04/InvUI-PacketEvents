@@ -71,6 +71,9 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     private final int size;
     private final List<List<SlotElement>> elementsDisplayed;
     private final BitSet dirtySlots;
+    private final BitSet structurallyDirtySlots;
+    private final BitSet periodicSlots;
+    private final int[] slotUpdatePeriods;
     private volatile boolean dirtyTitle;
     private @Nullable ScheduledTask tickTask;
     private int windowTick;
@@ -92,6 +95,9 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         this.serverWindowState = windowState;
         this.size = size;
         this.dirtySlots = new BitSet(size);
+        this.structurallyDirtySlots = new BitSet(size);
+        this.periodicSlots = new BitSet(size);
+        this.slotUpdatePeriods = new int[size];
         this.elementsDisplayed = IntStream.range(0, size)
             .<List<SlotElement>>mapToObj(i -> new ArrayList<>())
             .collect(Collectors.toCollection(ArrayList::new));
@@ -103,23 +109,47 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     
     protected void update(int slot, boolean structural) {
         SlotElement.GuiLink root = getGuiAt(slot);
-        if (root == null)
+        if (root == null) {
+            periodicSlots.clear(slot);
+            slotUpdatePeriods[slot] = 0;
             return;
-        
+        }
+
         List<SlotElement> path = elementsDisplayed.get(slot);
-        
-        // if path has changed, viewers need to be updated
-        if (structural && !root.checkTraverse(path)) {
+
+        boolean needsRetraversal;
+        if (structural) {
+            if (path.isEmpty()) {
+                needsRetraversal = true;
+            } else {
+                synchronized (dirtySlots) {
+                    needsRetraversal = structurallyDirtySlots.get(slot);
+                    if (needsRetraversal)
+                        structurallyDirtySlots.clear(slot);
+                }
+            }
+        } else {
+            needsRetraversal = false;
+        }
+
+        if (needsRetraversal) {
             unregisterAsViewer(slot, path);
             path = root.traverse();
-            
+
             registerAsViewer(slot, path);
             elementsDisplayed.set(slot, path);
         }
-        
+
         // create and place item stack in inventory
         ItemStack itemStack;
         SlotElement lastElement = path.getLast();
+        int updatePeriod = lastElement.getUpdatePeriod();
+        slotUpdatePeriods[slot] = updatePeriod;
+        if (updatePeriod > 0) {
+            periodicSlots.set(slot);
+        } else {
+            periodicSlots.clear(slot);
+        }
         if (!(lastElement instanceof SlotElement.GuiLink)) {
             itemStack = lastElement.getItemStack(getViewer());
             if (itemStack != null && lastElement instanceof SlotElement.Item) {
@@ -179,16 +209,29 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         for (int i = 0; i < size; i++) {
             unregisterAsViewer(i, elementsDisplayed.get(i));
             elementsDisplayed.set(i, List.of());
+            periodicSlots.clear(i);
+            slotUpdatePeriods[i] = 0;
+        }
+        synchronized (dirtySlots) {
+            structurallyDirtySlots.clear();
         }
     }
     
     protected void setMenuItem(int slot, @Nullable ItemStack itemStack) {
-        menu.setItem(slot, itemStack);
+        menu.setItemOwned(slot, itemStack);
     }
     
     public void notifyUpdate(int slot) {
         synchronized (dirtySlots) {
             dirtySlots.set(slot);
+        }
+    }
+
+    @Override
+    public void notifyStructuralUpdate(int slot) {
+        synchronized (dirtySlots) {
+            dirtySlots.set(slot);
+            structurallyDirtySlots.set(slot);
         }
     }
     
@@ -207,9 +250,9 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     private void updateAndFlush(UpdateType updateType, int pingId) {
         if (!isOpen())
             return;
-        
+
         updateType = updateType.or(updateSlots());
-        
+
         // title update resends entire inventory, so changes only need to be sent if title is not updated
         if (dirtyTitle) {
             dirtyTitle = false;
@@ -225,46 +268,40 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     
     private UpdateType updateSlots() {
         boolean changedAny = false;
-        
+
         // periodic updates (cannot be structural, only item or inventory element)
-        for (int slot = 0; slot < size; slot++) {
-            if (slot >= elementsDisplayed.size())
-                continue;
-            
-            var path = elementsDisplayed.get(slot);
-            if (path.isEmpty())
-                continue;
-            
-            var updatePeriod = path.getLast().getUpdatePeriod();
-            if (updatePeriod > 0 && windowTick % updatePeriod == 0) {
+        int slot = periodicSlots.nextSetBit(0);
+        while (slot != -1) {
+            if (windowTick % slotUpdatePeriods[slot] == 0) {
                 update(slot, false);
                 changedAny = true;
             }
+            slot = periodicSlots.nextSetBit(slot + 1);
         }
-        
+
         // updates from notifyWindows (can be structural, ex. gui slot element change)
         BitSet toUpdate;
         synchronized (dirtySlots) {
             toUpdate = (BitSet) dirtySlots.clone();
             dirtySlots.clear();
         }
-        
-        int slot = 0;
+
+        slot = 0;
         while ((slot = toUpdate.nextSetBit(slot)) != -1) {
             update(slot, true);
             changedAny = true;
             slot++;
         }
-        
+
         return changedAny ? UpdateType.DIRTY : UpdateType.NONE;
     }
     
     private void actuallyUpdateTitle() {
         var title = getTitle();
-        if (title.equals(activeTitle))
+        if (title == activeTitle || title.equals(activeTitle))
             return;
         activeTitle = title;
-        
+
         menu.sendOpenPacket(Languages.getInstance().localized(viewer, title));
     }
     
@@ -282,7 +319,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     
     @SuppressWarnings("UnstableApiUsage")
     private void handleOutsideClick(Click click) {
-        var cursor = viewer.getItemOnCursor();
+        var cursor = menu.getCursor();
         
         // fire InvUI event
         var event = new ClickEvent(click);
@@ -322,12 +359,19 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
             return;
         if (click.clickType() == ClickType.LEFT) {
             if (InventoryUtils.dropItemLikePlayer(viewer, cursor))
-                viewer.setItemOnCursor(null);
+                menu.setCursor(null);
         } else if (click.clickType() == ClickType.RIGHT) {
             var drop = cursor.clone();
             drop.setAmount(1);
-            if (InventoryUtils.dropItemLikePlayer(viewer, drop))
-                cursor.setAmount(cursor.getAmount() - 1);
+            if (InventoryUtils.dropItemLikePlayer(viewer, drop)) {
+                int remaining = cursor.getAmount() - 1;
+                if (remaining <= 0) {
+                    menu.setCursor(null);
+                } else {
+                    cursor.setAmount(remaining);
+                    menu.setCursor(cursor);
+                }
+            }
         }
     }
     
@@ -554,7 +598,8 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     public void close() {
         ThreadCheck.checkOwnedBy(getViewer());
         if (isOpen()) {
-            viewer.closeInventory(); // WindowManager then calls handleClose
+            menu.closeForViewer();
+            handleClose(Reason.PLUGIN);
         }
     }
     
@@ -568,7 +613,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         if (tickTask != null)
             tickTask.cancel();
         unregisterAsViewer();
-        menu.handleClosed();
+        menu.handleClosed(cause);
         isOpen = false;
         
         ItemStack cursor = menu.getCursor();

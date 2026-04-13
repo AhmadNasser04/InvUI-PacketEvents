@@ -9,9 +9,12 @@ import xyz.xenondevs.invui.Observer;
  * @param slot     The {@code how} value, i.e. what should be used to notify the {@link Observer} about updates.
  */
 public record ObserverAtSlot(Observer observer, int slot) {
-    
+
     public void notifyUpdate() {
         observer.notifyUpdate(slot);
     }
-    
+
+    public void notifyStructuralUpdate() {
+        observer.notifyStructuralUpdate(slot);
+    }
 }

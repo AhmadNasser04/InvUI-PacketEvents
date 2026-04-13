@@ -20,13 +20,14 @@ If you have any questions, feel free to join the [Discord](https://discord.com/i
 
 ## Version Compatibility
 
-Starting with v2, InvUI is no longer a multi-version library.
-See the table below for an overview of which InvUI version is compatible with which Minecraft version.
+This fork of InvUI replaces the upstream's NMS-based menu implementation with
+[PacketEvents](https://github.com/retrooper/packetevents) so a single jar runs
+across supported Minecraft versions without per-version compilation.
 
-| InvUI version | Minecraft version    |
-|---------------|----------------------|
-| `2.0.x`       | `26.1.1`             |
-| `1.49`        | `1.14.0` - `1.21.11` |
+**Runtime requirements**
+
+- Paper 1.21.0+ 
+- PacketEvents 2.12.0+ 
 
 ## Maven
 
