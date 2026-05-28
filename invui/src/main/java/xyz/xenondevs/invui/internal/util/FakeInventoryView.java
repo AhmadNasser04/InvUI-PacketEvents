@@ -6,7 +6,6 @@ import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.MenuType;
 import org.jspecify.annotations.Nullable;
 
 @SuppressWarnings("UnstableApiUsage")
@@ -95,10 +94,6 @@ public class FakeInventoryView implements InventoryView {
     }
     
     @Override
-    public void open() {
-    }
-    
-    @Override
     public void close() {
     }
     
@@ -126,19 +121,5 @@ public class FakeInventoryView implements InventoryView {
     @Override
     public void setTitle(String title) {
     }
-    
-    @Override
-    public @Nullable MenuType getMenuType() {
-        // if possible, uses a generic menu type that matches the inventory size
-        return switch (top.getSize()) {
-            case 9 -> MenuType.GENERIC_9X1;
-            case 18 -> MenuType.GENERIC_9X2;
-            case 27 -> MenuType.GENERIC_9X3;
-            case 36 -> MenuType.GENERIC_9X4;
-            case 45 -> MenuType.GENERIC_9X5;
-            case 54 -> MenuType.GENERIC_9X6;
-            default -> null;
-        };
-    }
-    
+
 }

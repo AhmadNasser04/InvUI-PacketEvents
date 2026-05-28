@@ -1,6 +1,5 @@
 package xyz.xenondevs.invui.gui;
 
-import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.threadedregions.scheduler.EntityScheduler;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
@@ -79,7 +78,7 @@ non-sealed abstract class AbstractGui implements Gui {
         this.background = background;
         
         slotElements = new SlotElement[size];
-        observers = CollectionUtils.newList(size, _ -> ConcurrentHashMap.newKeySet());
+        observers = CollectionUtils.newList(size, $ -> ConcurrentHashMap.newKeySet());
         
         this.background.observeWeak(this, AbstractGui::notifyWindowsOnBackgroundSlots);
     }
@@ -155,7 +154,7 @@ non-sealed abstract class AbstractGui implements Gui {
             player.setItemOnCursor(clicked);
         } else if (clicked != null && ItemUtils2.isBundle(cursor)) {
             // insert clicked item into bundle on cursor
-            if (inventory.callClickEvent(slot, click, InventoryAction.PICKUP_SOME_INTO_BUNDLE))
+            if (inventory.callClickEvent(slot, click, InventoryAction.PICKUP_SOME))
                 return;
             
             int toAdd = ItemUtils2.getMaxAmountToAddToBundle(cursor, clicked);
@@ -165,7 +164,7 @@ non-sealed abstract class AbstractGui implements Gui {
             player.setItemOnCursor(cursor);
         } else if (clicked != null && ItemUtils2.isBundle(clicked)) {
             // insert cursor item into clicked bundle
-            if (inventory.callClickEvent(slot, click, InventoryAction.PLACE_SOME_INTO_BUNDLE))
+            if (inventory.callClickEvent(slot, click, InventoryAction.PLACE_SOME))
                 return;
             
             ItemStack bundle = clicked.clone();
@@ -216,7 +215,7 @@ non-sealed abstract class AbstractGui implements Gui {
         
         if (cursor == null && ItemUtils2.isBundle(clicked)) {
             // take the selected item from the bundle
-            if (inventory.callClickEvent(slot, click, InventoryAction.PICKUP_FROM_BUNDLE))
+            if (inventory.callClickEvent(slot, click, InventoryAction.PICKUP_SOME))
                 return;
             
             ItemStack bundle = clicked.clone();
@@ -244,7 +243,7 @@ non-sealed abstract class AbstractGui implements Gui {
             player.setItemOnCursor(newCursor);
         } else if (clicked == null && ItemUtils2.isBundle(cursor)) {
             // if the player right-clicked on an empty slot with a bundle, place the first item from the bundle there
-            if (inventory.callClickEvent(slot, click, InventoryAction.PLACE_FROM_BUNDLE))
+            if (inventory.callClickEvent(slot, click, InventoryAction.PLACE_SOME))
                 return;
             
             ItemStack toTake = ItemUtils2.getFirstFromBundle(cursor);
@@ -325,7 +324,7 @@ non-sealed abstract class AbstractGui implements Gui {
             return;
         
         if (link.getHoldingElement() instanceof SlotElement.InventoryLink(
-            var otherInventory, var otherSlot, _, _
+            var otherInventory, var otherSlot, var idkOne, var idkTwo
         )) {
             if (inventory == otherInventory && slot == otherSlot)
                 return;
@@ -447,10 +446,9 @@ non-sealed abstract class AbstractGui implements Gui {
         }
     }
     
-    @SuppressWarnings("UnstableApiUsage")
     private void handleInvBundleSelect(Player player, Inventory inventory, int slot, int bundleSlot) {
         var bundle = inventory.getItem(slot);
-        if (bundle != null && bundle.hasData(DataComponentTypes.BUNDLE_CONTENTS)) {
+        if (bundle != null && ItemUtils2.isBundle(bundle)) {
             ItemUtils2.setSelectedBundleSlot(bundle, bundleSlot);
             inventory.setItem(new PlayerUpdateReason.BundleSelect(player, bundleSlot), slot, bundle);
         }

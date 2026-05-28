@@ -19,7 +19,7 @@ import java.util.function.Consumer;
 @NullUnmarked
 class BatchingProperty<T> implements MutableProperty<T> {
     
-    private static final ScopedValue<Void> DOWNSTREAM_UPDATE = ScopedValue.newInstance();
+    private static final ThreadLocal<Boolean> DOWNSTREAM_UPDATE = ThreadLocal.withInitial(() -> false);
     
     public final MutableProperty<T> upstream;
     private final Map<Object, List<Consumer<Object>>> observers = new WeakHashMap<>();
@@ -33,7 +33,7 @@ class BatchingProperty<T> implements MutableProperty<T> {
     public BatchingProperty(MutableProperty<T> upstream, Runnable notifier) {
         this.upstream = upstream;
         upstream.observeWeak(this, thisRef -> {
-            if (!DOWNSTREAM_UPDATE.isBound()) {
+            if (!DOWNSTREAM_UPDATE.get()) {
                 thisRef.dirty = true;
                 notifier.run();
             }
@@ -49,11 +49,15 @@ class BatchingProperty<T> implements MutableProperty<T> {
     
     @Override
     public void set(T value) {
-        ScopedValue.where(DOWNSTREAM_UPDATE, null).run(() -> {
+        boolean previous = DOWNSTREAM_UPDATE.get();
+        DOWNSTREAM_UPDATE.set(true);
+        try {
             dirty = false;
             upstream.set(value);
             observers.forEach((owner, observers) -> observers.forEach(observer -> observer.accept(owner)));
-        });
+        } finally {
+            DOWNSTREAM_UPDATE.set(previous);
+        }
     }
     
     @Override
@@ -64,7 +68,7 @@ class BatchingProperty<T> implements MutableProperty<T> {
     @SuppressWarnings("unchecked")
     @Override
     public <O> void observeWeak(@NonNull O owner, @NonNull Consumer<? super O> observer) {
-        observers.computeIfAbsent(owner, _ -> new ArrayList<>())
+        observers.computeIfAbsent(owner, $ -> new ArrayList<>())
             .add((Consumer<Object>) observer);
     }
     

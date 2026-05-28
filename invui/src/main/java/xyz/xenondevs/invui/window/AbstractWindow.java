@@ -155,7 +155,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
             if (itemStack != null && lastElement instanceof SlotElement.Item) {
                 // This makes every item unique to prevent Shift-DoubleClick "clicking" multiple items at the same time.
                 itemStack = itemStack.clone(); // clone ItemStack in order to not modify the original
-                itemStack.editPersistentDataContainer(pdc -> pdc.set(SLOT_KEY, PersistentDataType.BYTE, (byte) slot));
+                itemStack.editMeta(meta -> meta.getPersistentDataContainer().set(SLOT_KEY, PersistentDataType.BYTE, (byte) slot));
             }
         } else { // there is no holding element
             // background by gui
@@ -506,7 +506,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
                 playerInvSlots.add(slot.slot());
             } else {
                 slotsByInventory
-                    .computeIfAbsent(inv, _ -> new IntLinkedOpenHashSet())
+                    .computeIfAbsent(inv, $ -> new IntLinkedOpenHashSet())
                     .add(slot.slot());
             }
         }
@@ -570,7 +570,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
             
             // track window and elements
             WindowManager.getInstance().addWindow(this);
-            tickTask = getViewer().getScheduler().runAtFixedRate(InvUI.getInstance().getPlugin(), _ -> handleTick(), null, 1, 1);
+            tickTask = getViewer().getScheduler().runAtFixedRate(InvUI.getInstance().getPlugin(), $ -> handleTick(), null, 1, 1);
             registerAsViewer();
             
             // init items

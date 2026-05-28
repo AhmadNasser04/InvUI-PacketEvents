@@ -39,7 +39,7 @@ public final class Languages {
         
         @Override
         public Key name() {
-            return Key.key(InvUI.getInstance().getPlugin(), "invui_translator");
+            return Key.key("invui", "invui_translator");
         }
         
         @Override

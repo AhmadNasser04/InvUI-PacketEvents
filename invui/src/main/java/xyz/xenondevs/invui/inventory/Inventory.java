@@ -71,7 +71,7 @@ public sealed abstract class Inventory implements Observable permits VirtualInve
     
     public Inventory(int size) {
         this.size = size;
-        observers = CollectionUtils.newList(size, _ -> ConcurrentHashMap.newKeySet());
+        observers = CollectionUtils.newList(size, $ -> ConcurrentHashMap.newKeySet());
         iterationOrders = CollectionUtils.newEnumMap(OperationCategory.class, k -> IntStream.range(0, size).toArray());
         guiPriorities = CollectionUtils.newEnumMap(OperationCategory.class, k -> 0);
     }

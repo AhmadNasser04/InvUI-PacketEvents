@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.3.10"
-paper = "26.1.2.+"
-testpaper = "1.21.11-R0.1-SNAPSHOT"
+paper = "1.21.1-R0.1-SNAPSHOT"
+testpaper = "1.21.1-R0.1-SNAPSHOT"
 packetevents = "2.12.0"
 
 [libraries]
@@ -13,7 +13,7 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platformLauncher = { module = "org.junit.platform:junit-platform-launcher" }
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlin-test-junit = { group = "org.jetbrains.kotlin", name = "kotlin-test-junit", version.ref = "kotlin" }
-mockbukkit = { module = "org.mockbukkit.mockbukkit:mockbukkit-v1.21", version = "4.106.1" }
+mockbukkit = { module = "org.mockbukkit.mockbukkit:mockbukkit-v1.21", version = "4.15.0" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.21" }
 paperweight-userdev-plugin = { module = "io.papermc.paperweight:paperweight-userdev", version = "2.0.0-beta.21" }
 packetevents-spigot = { module = "com.github.retrooper:packetevents-spigot", version.ref = "packetevents" }

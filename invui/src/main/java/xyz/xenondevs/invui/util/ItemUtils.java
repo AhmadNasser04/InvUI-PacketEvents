@@ -1,7 +1,5 @@
 package xyz.xenondevs.invui.util;
 
-import io.papermc.paper.datacomponent.DataComponentTypes;
-import net.kyori.adventure.key.Key;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.jspecify.annotations.Nullable;
@@ -114,7 +112,7 @@ public final class ItemUtils {
             placeholder = new ItemBuilder(Material.BARRIER)
                 .setName("") // for anvil window default rename text
                 .hideTooltip(true)
-                .set(DataComponentTypes.ITEM_MODEL, Key.key("air"))
+                .setMaterial(Material.AIR)
                 .build();
         }
         

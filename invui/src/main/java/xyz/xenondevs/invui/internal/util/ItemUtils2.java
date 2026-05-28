@@ -1,22 +1,16 @@
 package xyz.xenondevs.invui.internal.util;
 
-import io.papermc.paper.datacomponent.DataComponentType;
-import io.papermc.paper.datacomponent.DataComponentTypes;
 import org.bukkit.Material;
-import org.bukkit.Registry;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BundleMeta;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.util.ItemUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
-import static io.papermc.paper.datacomponent.item.BundleContents.bundleContents;
-
-@SuppressWarnings("UnstableApiUsage")
 public class ItemUtils2 {
-    
+
     /**
      * Creates a new list where all intermediary empty item stacks are replaced with the non-empty placeholder item
      * and all trailing empty item stacks are removed.
@@ -26,7 +20,7 @@ public class ItemUtils2 {
      */
     public static List<ItemStack> withoutIntermediaryEmpties(List<? extends @Nullable ItemStack> items) {
         var sanitized = new ArrayList<ItemStack>();
-        
+
         int lastNonNull = -1;
         for (int i = 0; i < items.size(); i++) {
             var itemStack = items.get(i);
@@ -34,7 +28,7 @@ public class ItemUtils2 {
                 lastNonNull = i;
             }
         }
-        
+
         for (int i = 0; i <= lastNonNull; i++) {
             var itemStack = items.get(i);
             if (ItemUtils.isEmpty(itemStack)) {
@@ -43,10 +37,10 @@ public class ItemUtils2 {
                 sanitized.add(itemStack);
             }
         }
-        
+
         return sanitized;
     }
-    
+
     /**
      * Checks whether the given item stack is a bundle.
      *
@@ -54,10 +48,26 @@ public class ItemUtils2 {
      * @return true if the item stack is a bundle, false otherwise
      */
     public static boolean isBundle(ItemStack bundle) {
-        return bundle.hasData(DataComponentTypes.BUNDLE_CONTENTS);
+        return bundle.getItemMeta() instanceof BundleMeta;
     }
-    
-    
+
+    /**
+     * Returns a mutable copy of the bundle's contents, or {@code null} if the
+     * item stack is not a bundle.
+     */
+    private static @Nullable List<ItemStack> getContents(ItemStack bundle) {
+        if (!(bundle.getItemMeta() instanceof BundleMeta meta))
+            return null;
+        return new ArrayList<>(meta.getItems());
+    }
+
+    /**
+     * Writes the given contents back into the bundle. No-op if the item stack is not a bundle.
+     */
+    private static void setContents(ItemStack bundle, List<ItemStack> contents) {
+        bundle.editMeta(BundleMeta.class, meta -> meta.setItems(contents));
+    }
+
     /**
      * Adds the given target stack to the given bundle stack, updating both
      * stacks appropriately. The vanilla weight formula ({@code sum(amount *
@@ -71,7 +81,7 @@ public class ItemUtils2 {
         if (ItemUtils.isEmpty(target))
             return false;
 
-        var contents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        var contents = getContents(bundle);
         if (contents == null)
             return false;
 
@@ -79,7 +89,7 @@ public class ItemUtils2 {
         if (maxToAdd <= 0)
             return false;
 
-        var newList = new ArrayList<>(contents.contents());
+        var newList = new ArrayList<>(contents);
         int remaining = Math.min(target.getAmount(), maxToAdd);
         int added = 0;
 
@@ -110,11 +120,11 @@ public class ItemUtils2 {
         if (added == 0)
             return false;
 
-        bundle.setData(DataComponentTypes.BUNDLE_CONTENTS, bundleContents(newList));
+        setContents(bundle, newList);
         target.setAmount(target.getAmount() - added);
         return true;
     }
-    
+
     /**
      * Calculates the difference in item amounts between two bundles, matching for a given target item stack.
      *
@@ -124,23 +134,23 @@ public class ItemUtils2 {
      * @return the difference in item amounts between the two bundles for the given target item stack
      */
     public static int getBundleDifference(ItemStack bundleA, ItemStack bundleB, ItemStack target) {
-        var contentsA = bundleA.getData(DataComponentTypes.BUNDLE_CONTENTS);
-        var contentsB = bundleB.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        var contentsA = getContents(bundleA);
+        var contentsB = getContents(bundleB);
         if (contentsA == null || contentsB == null)
             return 0;
-        
-        var countA = contentsA.contents().stream()
+
+        var countA = contentsA.stream()
             .filter(is -> is.isSimilar(target))
             .mapToInt(ItemStack::getAmount)
             .sum();
-        var countB = contentsB.contents().stream()
+        var countB = contentsB.stream()
             .filter(is -> is.isSimilar(target))
             .mapToInt(ItemStack::getAmount)
             .sum();
-        
+
         return countA - countB;
     }
-    
+
     /**
      * Gets the maximum amount of items from {@code target} that can fit into
      * {@code bundle} according to the vanilla bundle weight formula.
@@ -149,13 +159,13 @@ public class ItemUtils2 {
         if (ItemUtils.isEmpty(target))
             return 0;
 
-        var contents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        var contents = getContents(bundle);
         if (contents == null)
             return 0;
 
         // Vanilla weight: each item's weight = 64 / maxStackSize. Bundle capacity = 64.
         int usedWeight = 0;
-        for (var stack : contents.contents()) {
+        for (var stack : contents) {
             int perItem = 64 / Math.max(1, stack.getMaxStackSize());
             usedWeight += stack.getAmount() * perItem;
         }
@@ -169,7 +179,7 @@ public class ItemUtils2 {
 
         return Math.min(target.getAmount(), remainingWeight / perTargetWeight);
     }
-    
+
     /**
      * Gets the first item stack from the bundle without removing it.
      *
@@ -177,14 +187,12 @@ public class ItemUtils2 {
      * @return the first item stack in the bundle, or null if there is none
      */
     public static @Nullable ItemStack getFirstFromBundle(ItemStack bundle) {
-        var bundleContents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
-        if (bundleContents == null)
+        var contents = getContents(bundle);
+        if (contents == null || contents.isEmpty())
             return null;
-        
-        var contents = bundleContents.contents();
-        return contents.isEmpty() ? null : contents.getFirst();
+        return contents.getFirst();
     }
-    
+
     /**
      * Updates the given bundle by removing target's amount of items similar to target from the bundle.
      *
@@ -195,13 +203,12 @@ public class ItemUtils2 {
     public static int removeFromBundle(ItemStack bundle, ItemStack target) {
         if (ItemUtils.isEmpty(bundle) || ItemUtils.isEmpty(target))
             return target.getAmount();
-        
-        var bundleContents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
-        if (bundleContents == null)
+
+        var contents = getContents(bundle);
+        if (contents == null)
             return target.getAmount();
-        
+
         int amountLeft = target.getAmount();
-        var contents = new ArrayList<>(bundleContents.contents());
         var iterator = contents.iterator();
         while (iterator.hasNext() && amountLeft > 0) {
             var itemStack = iterator.next();
@@ -216,24 +223,40 @@ public class ItemUtils2 {
                 }
             }
         }
-        
-        bundle.setData(DataComponentTypes.BUNDLE_CONTENTS, bundleContents(contents));
+
+        setContents(bundle, contents);
         return amountLeft;
     }
-    
+
+    /**
+     * Removes and returns the first item from the bundle, writing the updated contents back.
+     * <p>
+     * 1.21.1 has no concept of a selected bundle item, so the first item is taken.
+     *
+     * @param bundle the bundle item stack
+     * @return the taken item stack, or null if the bundle is empty or not a bundle
+     */
     public static @Nullable ItemStack takeSelectedFromBundle(ItemStack bundle) {
-        return NmsBridge.takeBundleSelected(bundle);
+        var contents = getContents(bundle);
+        if (contents == null || contents.isEmpty())
+            return null;
+
+        var taken = contents.removeFirst();
+        setContents(bundle, contents);
+        return taken;
     }
 
     /**
      * Sets the selected bundle slot.
+     * <p>
+     * 1.21.1 has no concept of a selected bundle item, so this is a no-op.
      */
     public static void setSelectedBundleSlot(ItemStack bundle, int bundleSlot) {
-        NmsBridge.setBundleSelectedIndex(bundle, bundleSlot);
+        // bundle item selection does not exist on 1.21.1
     }
-    
+
     /**
-     * Creates a new {@link ItemStack} of the given target type, copying all data components (prototype + patch) to
+     * Creates a new {@link ItemStack} of the given target type, copying all data components to
      * the new item stack. This will make the new item stack look exactly like the original item stack, except
      * that it is a different type.
      *
@@ -244,24 +267,8 @@ public class ItemUtils2 {
     public static ItemStack asType(ItemStack original, Material targetType) {
         if (original.isEmpty())
             return ItemStack.empty();
-        
-        ItemStack result = ItemStack.of(targetType, original.getAmount());
-        for (var type : Registry.DATA_COMPONENT_TYPE) {
-            if (original.hasData(type)) {
-                if (type instanceof DataComponentType.Valued<?> valuedType) {
-                    copyDataComponent(valuedType, original, result);
-                } else if (type instanceof DataComponentType.NonValued nonValuedType) {
-                    result.setData(nonValuedType);
-                }
-            } else {
-                result.unsetData(type);
-            }
-        }
-        return result;
+
+        return NmsBridge.asType(original, targetType);
     }
-    
-    private static <T> void copyDataComponent(DataComponentType.Valued<T> type, ItemStack from, ItemStack to) {
-        to.setData(type, Objects.requireNonNull(from.getData(type)));
-    }
-    
+
 }

@@ -6,7 +6,6 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.MenuType;
 import org.bukkit.persistence.PersistentDataType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -172,33 +171,5 @@ class FakeInventoryViewTest {
         var top = Bukkit.createInventory(null, 9 * 3);
         var view = new FakeInventoryView(player, top);
         assertEquals((9 * 3) + player.getInventory().getSize(), view.countSlots());
-    }
-    
-    @SuppressWarnings("UnstableApiUsage")
-    @Test
-    void getMenuType() {
-        var player = server.addPlayer();
-        var top9x1 = Bukkit.createInventory(null, 9);
-        var top9x2 = Bukkit.createInventory(null, 9 * 2);
-        var top9x3 = Bukkit.createInventory(null, 9 * 3);
-        var top9x4 = Bukkit.createInventory(null, 9 * 4);
-        var top9x5 = Bukkit.createInventory(null, 9 * 5);
-        var top9x6 = Bukkit.createInventory(null, 9 * 6);
-        var top5x5 = new VirtualInventory(5 * 5).asBukkitInventory();
-        var view9x1 = new FakeInventoryView(player, top9x1);
-        var view9x2 = new FakeInventoryView(player, top9x2);
-        var view9x3 = new FakeInventoryView(player, top9x3);
-        var view9x4 = new FakeInventoryView(player, top9x4);
-        var view9x5 = new FakeInventoryView(player, top9x5);
-        var view9x6 = new FakeInventoryView(player, top9x6);
-        var view5x5 = new FakeInventoryView(player, top5x5);
-        
-        assertEquals(MenuType.GENERIC_9X1, view9x1.getMenuType());
-        assertEquals(MenuType.GENERIC_9X2, view9x2.getMenuType());
-        assertEquals(MenuType.GENERIC_9X3, view9x3.getMenuType());
-        assertEquals(MenuType.GENERIC_9X4, view9x4.getMenuType());
-        assertEquals(MenuType.GENERIC_9X5, view9x5.getMenuType());
-        assertEquals(MenuType.GENERIC_9X6, view9x6.getMenuType());
-        assertNull(view5x5.getMenuType());
     }
 }

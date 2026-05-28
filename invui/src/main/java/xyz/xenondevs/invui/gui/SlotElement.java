@@ -147,7 +147,7 @@ public sealed interface SlotElement {
          * @param backgroundProperty The property containing the {@link ItemProvider} to use as background if the linked slot is empty.
          */
         public InventoryLink(Inventory inventory, int slot, Property<@Nullable ItemProvider> backgroundProperty) {
-            this(inventory, slot, backgroundProperty, _ -> null);
+            this(inventory, slot, backgroundProperty, $ -> null);
         }
         
         /**

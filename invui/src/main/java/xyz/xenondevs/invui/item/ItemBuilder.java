@@ -1,12 +1,5 @@
 package xyz.xenondevs.invui.item;
 
-import com.google.common.collect.Sets;
-import io.papermc.paper.datacomponent.DataComponentBuilder;
-import io.papermc.paper.datacomponent.DataComponentType;
-import io.papermc.paper.datacomponent.DataComponentTypes;
-import io.papermc.paper.datacomponent.item.CustomModelData;
-import io.papermc.paper.datacomponent.item.ItemLore;
-import io.papermc.paper.datacomponent.item.TooltipDisplay;
 import it.unimi.dsi.fastutil.booleans.BooleanArrayList;
 import it.unimi.dsi.fastutil.booleans.BooleanList;
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
@@ -23,9 +16,9 @@ import org.bukkit.Color;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.ItemType;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.i18n.Languages;
-import xyz.xenondevs.invui.internal.util.ArrayUtils;
 import xyz.xenondevs.invui.internal.util.ComponentUtils;
 
 import java.util.*;
@@ -34,7 +27,6 @@ import java.util.stream.Collectors;
 
 import static net.kyori.adventure.text.minimessage.MiniMessage.miniMessage;
 import static net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection;
-import static org.jetbrains.annotations.ApiStatus.Experimental;
 
 /**
  * Utility for building (localized) {@link ItemStack ItemStacks}.
@@ -100,20 +92,20 @@ public final class ItemBuilder implements ItemProvider {
      */
     public ItemBuilder(ItemStack base) {
         this.itemStack = base.clone();
-        
-        ItemLore lore = base.getData(DataComponentTypes.LORE);
-        if (lore != null) {
-            this.lore = lore.lines().stream()
-                .map(DirectComponentHolder::new)
-                .collect(Collectors.toCollection(ArrayList::new));
-        }
-        
-        CustomModelData cmd = base.getData(DataComponentTypes.CUSTOM_MODEL_DATA);
-        if (cmd != null) {
-            customModelDataFloats = new FloatArrayList(cmd.floats());
-            customModelDataBooleans = new BooleanArrayList(cmd.flags());
-            customModelDataStrings = new ArrayList<>(cmd.strings());
-            customModelDataColors = new IntArrayList(cmd.colors().stream().mapToInt(Color::asRGB).toArray());
+
+        ItemMeta meta = base.getItemMeta();
+        if (meta != null) {
+            if (meta.hasLore()) {
+                this.lore = Objects.requireNonNull(meta.lore()).stream()
+                    .map(DirectComponentHolder::new)
+                    .collect(Collectors.toCollection(ArrayList::new));
+            }
+
+            // 1.21.1 only supports a single integer custom model data value
+            if (meta.hasCustomModelData()) {
+                customModelDataFloats = new FloatArrayList();
+                customModelDataFloats.add(meta.getCustomModelData());
+            }
         }
     }
     
@@ -156,61 +148,50 @@ public final class ItemBuilder implements ItemProvider {
      */
     public ItemStack build(Locale locale) {
         ItemStack itemStack = this.itemStack.clone();
-        
+
         TagResolver[] resolvers = this.placeholders != null
             ? this.placeholders.values().toArray(TagResolver[]::new)
             : new TagResolver[0];
-        
-        if (this.name != null) {
-            Component name = this.name.get(resolvers);
-            name = Languages.getInstance().localized(locale, name, resolvers);
-            itemStack.setData(DataComponentTypes.ITEM_NAME, name);
-        }
-        
-        if (this.customName != null) {
-            Component customName = this.customName.get(resolvers);
-            customName = Languages.getInstance().localized(locale, customName, resolvers);
-            itemStack.setData(DataComponentTypes.CUSTOM_NAME, customName);
-        }
-        
-        if (lore != null) {
-            ItemLore.Builder lore = ItemLore.lore();
-            for (ComponentHolder lineHolder : this.lore) {
-                Component line = lineHolder.get(resolvers);
-                line = Languages.getInstance().localized(locale, line, resolvers);
-                lore.addLine(line);
+
+        ItemMeta meta = itemStack.getItemMeta();
+        if (meta != null) {
+            if (this.name != null) {
+                Component name = this.name.get(resolvers);
+                name = Languages.getInstance().localized(locale, name, resolvers);
+                meta.itemName(name);
             }
-            
-            itemStack.setData(DataComponentTypes.LORE, lore.build());
-        }
-        
-        if (customModelDataFloats != null
-            || customModelDataBooleans != null
-            || customModelDataStrings != null
-            || customModelDataColors != null
-        ) {
-            var cmdBuilder = CustomModelData.customModelData();
-            if (customModelDataFloats != null)
-                cmdBuilder.addFloats(customModelDataFloats);
-            if (customModelDataBooleans != null)
-                cmdBuilder.addFlags(customModelDataBooleans);
-            if (customModelDataStrings != null)
-                cmdBuilder.addStrings(customModelDataStrings);
-            if (customModelDataColors != null) {
-                var colorList = customModelDataColors.intStream()
-                    .mapToObj(Color::fromARGB)
-                    .toList();
-                cmdBuilder.addColors(colorList);
+
+            if (this.customName != null) {
+                Component customName = this.customName.get(resolvers);
+                customName = Languages.getInstance().localized(locale, customName, resolvers);
+                meta.displayName(customName);
             }
-            itemStack.setData(DataComponentTypes.CUSTOM_MODEL_DATA, cmdBuilder.build());
+
+            if (lore != null) {
+                var lines = new ArrayList<Component>();
+                for (ComponentHolder lineHolder : this.lore) {
+                    Component line = lineHolder.get(resolvers);
+                    line = Languages.getInstance().localized(locale, line, resolvers);
+                    lines.add(line);
+                }
+                meta.lore(lines);
+            }
+
+            // 1.21.1 only supports a single integer custom model data value;
+            // the first float entry (if any) is used, other sections are ignored
+            if (customModelDataFloats != null && !customModelDataFloats.isEmpty()) {
+                meta.setCustomModelData((int) customModelDataFloats.getFloat(0));
+            }
+
+            itemStack.setItemMeta(meta);
         }
-        
+
         if (modifiers != null) {
             for (var modifier : modifiers) {
                 itemStack = modifier.apply(itemStack);
             }
         }
-        
+
         return itemStack;
     }
     
@@ -410,7 +391,7 @@ public final class ItemBuilder implements ItemProvider {
         
         this.name = new DirectComponentHolder(name);
         this.customName = null;
-        unset(DataComponentTypes.CUSTOM_NAME);
+        itemStack.editMeta(meta -> meta.displayName(null));
         hideTooltip(false);
         return this;
     }
@@ -428,7 +409,7 @@ public final class ItemBuilder implements ItemProvider {
         
         this.name = new MiniMessageComponentHolder(name);
         this.customName = null;
-        unset(DataComponentTypes.CUSTOM_NAME);
+        itemStack.editMeta(meta -> meta.displayName(null));
         hideTooltip(false);
         return this;
     }
@@ -458,7 +439,7 @@ public final class ItemBuilder implements ItemProvider {
         
         this.customName = new DirectComponentHolder(customName);
         this.name = null;
-        unset(DataComponentTypes.ITEM_NAME);
+        itemStack.editMeta(meta -> meta.itemName(null));
         hideTooltip(false);
         return this;
     }
@@ -476,7 +457,7 @@ public final class ItemBuilder implements ItemProvider {
         
         this.customName = new MiniMessageComponentHolder(customName);
         this.name = null;
-        unset(DataComponentTypes.ITEM_NAME);
+        itemStack.editMeta(meta -> meta.itemName(null));
         hideTooltip(false);
         return this;
     }
@@ -520,7 +501,7 @@ public final class ItemBuilder implements ItemProvider {
         buildCache.clear();
         
         this.lore = null;
-        itemStack.unsetData(DataComponentTypes.LORE);
+        itemStack.editMeta(meta -> meta.lore(null));
         return this;
     }
     
@@ -1061,8 +1042,8 @@ public final class ItemBuilder implements ItemProvider {
     public ItemBuilder clearCustomModelData() {
         buildCache.clear();
         
-        itemStack.unsetData(DataComponentTypes.CUSTOM_MODEL_DATA);
-        
+        itemStack.editMeta(meta -> meta.setCustomModelData((Integer) null));
+
         customModelDataFloats = null;
         customModelDataBooleans = null;
         customModelDataStrings = null;
@@ -1083,74 +1064,12 @@ public final class ItemBuilder implements ItemProvider {
      */
     public ItemBuilder hideTooltip(boolean hide) {
         buildCache.clear();
-        
-        TooltipDisplay display = itemStack.getData(DataComponentTypes.TOOLTIP_DISPLAY);
-        itemStack.setData(
-            DataComponentTypes.TOOLTIP_DISPLAY,
-            TooltipDisplay.tooltipDisplay()
-                .hideTooltip(hide)
-                .hiddenComponents(display != null ? display.hiddenComponents() : Set.of())
-                .build()
-        );
-        
+
+        itemStack.editMeta(meta -> meta.setHideTooltip(hide));
+
         return this;
     }
-    
-    /**
-     * Hides the tooltip for the given data components.
-     *
-     * @param type  The first data component type to hide the tooltip for
-     * @param types Additional data component types to hide the tooltip for
-     * @return The builder instance
-     * @see #showTooltip(DataComponentType, DataComponentType...)
-     * @see #hideTooltip(boolean)
-     */
-    public ItemBuilder hideTooltip(DataComponentType type, DataComponentType... types) {
-        buildCache.clear();
-        
-        TooltipDisplay display = itemStack.getData(DataComponentTypes.TOOLTIP_DISPLAY);
-        itemStack.setData(
-            DataComponentTypes.TOOLTIP_DISPLAY,
-            TooltipDisplay.tooltipDisplay()
-                .hideTooltip(display != null && display.hideTooltip())
-                .hiddenComponents(display != null ? display.hiddenComponents() : Set.of())
-                .hiddenComponents(Set.of(ArrayUtils.concat(DataComponentType[]::new, type, types)))
-                .build()
-        );
-        
-        return this;
-    }
-    
-    /**
-     * Un-hides the tooltip for the given data components that were previously hidden.
-     *
-     * @param type  The first data component type to un-hide the tooltip for
-     * @param types Additional data component types to un-hide the tooltip for
-     * @return The builder instance
-     * @see #hideTooltip(DataComponentType, DataComponentType...)
-     * @see #hideTooltip(boolean)
-     */
-    public ItemBuilder showTooltip(DataComponentType type, DataComponentType... types) {
-        TooltipDisplay display = itemStack.getData(DataComponentTypes.TOOLTIP_DISPLAY);
-        if (display == null)
-            return this;
-        
-        buildCache.clear();
-        
-        itemStack.setData(
-            DataComponentTypes.TOOLTIP_DISPLAY,
-            TooltipDisplay.tooltipDisplay()
-                .hideTooltip(display.hideTooltip())
-                .hiddenComponents(Sets.difference(
-                    display.hiddenComponents(),
-                    Set.of(ArrayUtils.concat(DataComponentType[]::new, type, types))
-                ))
-                .build()
-        );
-        
-        return this;
-    }
-    
+
     /**
      * Actives, deactivates, or resets the enchantment glint to its default behavior.
      *
@@ -1159,11 +1078,9 @@ public final class ItemBuilder implements ItemProvider {
      * @return The builder instance
      */
     public ItemBuilder setGlint(@Nullable Boolean glint) {
-        if (glint == null) {
-            unset(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE);
-        } else {
-            set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, glint);
-        }
+        buildCache.clear();
+
+        itemStack.editMeta(meta -> meta.setEnchantmentGlintOverride(glint));
         return this;
     }
     //</editor-fold>
@@ -1200,79 +1117,7 @@ public final class ItemBuilder implements ItemProvider {
     }
     
     //</editor-fold>
-    
-    //<editor-fold desc="data component">
-    
-    /**
-     * Proxy method for {@link ItemStack#setData(DataComponentType.Valued, DataComponentBuilder)}
-     * <p>
-     * Sets the given data component to the specified value.
-     *
-     * @param type         the data component type
-     * @param valueBuilder value builder
-     * @param <T>          value type
-     * @return The builder instance
-     */
-    @Experimental
-    public <T> ItemBuilder set(DataComponentType.Valued<T> type, DataComponentBuilder<T> valueBuilder) {
-        buildCache.clear();
-        
-        itemStack.setData(type, valueBuilder);
-        return this;
-    }
-    
-    /**
-     * Proxy method for {@link ItemStack#setData(DataComponentType.Valued, Object)}
-     * <p>
-     * Sets the given data component to the specified value.
-     *
-     * @param type  the data component type
-     * @param value value to set
-     * @param <T>   value type
-     * @return The builder instance
-     */
-    @Experimental
-    public <T> ItemBuilder set(final DataComponentType.Valued<T> type, T value) {
-        buildCache.clear();
-        
-        itemStack.setData(type, value);
-        return this;
-    }
-    
-    /**
-     * Proxy method for {@link ItemStack#setData(DataComponentType.NonValued)}
-     * <p>
-     * Marks the given component as present in the item stack.
-     *
-     * @param type the data component type
-     * @return The builder instance
-     */
-    @Experimental
-    public ItemBuilder set(DataComponentType.NonValued type) {
-        buildCache.clear();
-        
-        itemStack.setData(type);
-        return this;
-    }
-    
-    /**
-     * Proxy method for {@link ItemStack#unsetData(DataComponentType)}
-     * <p>
-     * Marks the given component as removed from the item stack.
-     *
-     * @param type the data component type
-     * @return The builder instance
-     */
-    @Experimental
-    public ItemBuilder unset(DataComponentType type) {
-        buildCache.clear();
-        
-        itemStack.unsetData(type);
-        return this;
-    }
-    
-    //</editor-fold>
-    
+
     /**
      * Clones this builder.
      *

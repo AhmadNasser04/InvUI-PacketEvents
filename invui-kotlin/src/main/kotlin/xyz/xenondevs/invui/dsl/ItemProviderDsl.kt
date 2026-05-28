@@ -2,14 +2,9 @@
 
 package xyz.xenondevs.invui.dsl
 
-import io.papermc.paper.datacomponent.DataComponentType
-import io.papermc.paper.datacomponent.DataComponentTypes
-import io.papermc.paper.datacomponent.item.ItemLore.lore
-import io.papermc.paper.datacomponent.item.TooltipDisplay.tooltipDisplay
 import net.kyori.adventure.text.Component
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.ItemType
-import xyz.xenondevs.commons.provider.NULL_PROVIDER
 import xyz.xenondevs.commons.provider.Provider
 import xyz.xenondevs.commons.provider.combinedProvider
 import xyz.xenondevs.commons.provider.provider
@@ -106,15 +101,11 @@ inline fun itemProvider(type: ItemType, itemProvider: ItemProviderDsl.() -> Unit
  * String values for [name] and [lore] are automatically parsed as
  * [MiniMessage][net.kyori.adventure.text.minimessage.MiniMessage].
  *
- * For data components not covered by the convenience properties, use [data] to access
- * arbitrary [DataComponentType][io.papermc.paper.datacomponent.DataComponentType]s directly.
- *
  * ```
  * val myProvider = itemProvider(ItemType.DIAMOND_SWORD) {
  *     name by "<red>Fire Sword"
  *     lore by listOf("<gray>A legendary weapon", "<gray>Forged in flames")
  *     hasGlint by true
- *     data[DataComponentTypes.MAX_DAMAGE] by 500
  * }
  * ```
  */
@@ -153,7 +144,7 @@ sealed interface ItemProviderDsl {
     val amount: ProviderDslProperty<Int?>
     
     /**
-     * The item name ([DataComponentTypes.ITEM_NAME][io.papermc.paper.datacomponent.DataComponentTypes.ITEM_NAME]),
+     * The item name (`minecraft:item_name`),
      * or `null` to keep the base stack's name. Setting this automatically enables the tooltip.
      *
      * Defaults to `null`. Can be set to a [Component] or bound to a [Provider]:
@@ -170,7 +161,7 @@ sealed interface ItemProviderDsl {
     val name: ProviderDslProperty<Component?>
     
     /**
-     * The custom name ([DataComponentTypes.CUSTOM_NAME][io.papermc.paper.datacomponent.DataComponentTypes.CUSTOM_NAME]),
+     * The custom name (`minecraft:custom_name`),
      * or `null` to keep the base stack's custom name. Unlike [name], this is the
      * player-visible renamed name (as from an anvil).
      *
@@ -227,70 +218,7 @@ sealed interface ItemProviderDsl {
      * ```
      */
     val hasTooltip: ProviderDslProperty<Boolean?>
-    
-    /**
-     * Access to arbitrary data components beyond the convenience properties.
-     *
-     * ```
-     * data[DataComponentTypes.MAX_DAMAGE] by 500
-     * data[DataComponentTypes.FIRE_RESISTANT] by true
-     * ```
-     *
-     * @see DataComponentsPatchDsl
-     */
-    val data: DataComponentsPatchDsl
-    
-}
 
-/**
- * DSL scope for setting arbitrary data components on an [ItemProvider].
- *
- * Accessed via [ItemProviderDsl.data]. Use the indexing operator with a
- * [DataComponentType] to get a [ProviderDslProperty] for that component:
- *
- * ```
- * itemProvider(ItemType.DIAMOND_SWORD) {
- *     data[DataComponentTypes.MAX_DAMAGE] by 500
- *     data[DataComponentTypes.FIRE_RESISTANT] by true
- * }
- * ```
- */
-@ItemDslMarker
-@ExperimentalDslApi
-sealed interface DataComponentsPatchDsl {
-    
-    /**
-     * Returns a [ProviderDslProperty] for the given valued data component type.
-     * Set to `null` to leave unchanged, or to a value (or [Provider]) to override:
-     * ```
-     * data[DataComponentTypes.MAX_DAMAGE] by 500
-     * ```
-     */
-    operator fun <T : Any> get(type: DataComponentType.Valued<T>): ProviderDslProperty<T?>
-    
-    /**
-     * Returns a [ProviderDslProperty] for the given non-valued data component type.
-     * Set to `true` to apply, `false` to remove, or `null` to leave unchanged:
-     * ```
-     * data[DataComponentTypes.FIRE_RESISTANT] by true
-     * ```
-     */
-    operator fun <T : Any> get(type: DataComponentType.NonValued): ProviderDslProperty<Boolean?>
-    
-}
-
-@Suppress("UNCHECKED_CAST")
-@ExperimentalDslApi
-internal class DataComponentsPatchImpl : DataComponentsPatchDsl {
-    
-    val components = mutableMapOf<DataComponentType, Provider<*>>()
-    
-    override fun <T : Any> get(type: DataComponentType.Valued<T>): ProviderDslProperty<T?> =
-        ProviderDslProperty<T?>(components[type] as? Provider<T> ?: NULL_PROVIDER) { components[type] = it }
-    
-    override fun <T : Any> get(type: DataComponentType.NonValued): ProviderDslProperty<Boolean?> =
-        ProviderDslProperty<Boolean?>(components[type] as? Provider<Boolean> ?: NULL_PROVIDER) { components[type] = it }
-    
 }
 
 @PublishedApi
@@ -298,15 +226,15 @@ internal class DataComponentsPatchImpl : DataComponentsPatchDsl {
 internal class ItemProviderDslImpl(
     private var _base: Provider<ItemStack>
 ) : ItemProviderDsl {
-    
+
     private var _type = provider<ItemType?>(null)
     private var _amount = provider<Int?>(null)
     private var _name = provider<Component?>(null)
+    private var _customName = provider<Component?>(null)
     private var _lore = provider<List<Component>?>(null)
     private var _hasTooltip = provider<Boolean?>(null)
-    
-    override val data = DataComponentsPatchImpl()
-    
+    private var _hasGlint = provider<Boolean?>(null)
+
     override val base: ProviderDslProperty<ItemStack>
         get() = ProviderDslProperty(::_base)
     override val type: ProviderDslProperty<ItemType?>
@@ -320,70 +248,41 @@ internal class ItemProviderDslImpl(
     override val hasTooltip: ProviderDslProperty<Boolean?>
         get() = ProviderDslProperty(::_hasTooltip)
     override val customName: ProviderDslProperty<Component?>
-        get() = data[DataComponentTypes.CUSTOM_NAME]
+        get() = ProviderDslProperty(::_customName)
     override val hasGlint: ProviderDslProperty<Boolean?>
-        get() = data[DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE]
-    
+        get() = ProviderDslProperty(::_hasGlint)
+
     fun build(): Provider<ItemProvider> {
-        val dataTypeProviders = data.components.map { (type, dslProperty) -> dslProperty.map { type to it } }
         return combinedProvider(
-            _base, _type, _amount, _name, _lore, _hasTooltip, combinedProvider(dataTypeProviders)
-        ) { base, type, amount, name, lore, hasTooltip, dataTypes ->
+            _base, _type, _amount, _name, _customName, _lore, _hasTooltip, _hasGlint
+        ) { base, type, amount, name, customName, lore, hasTooltip, hasGlint ->
             var result = base.clone()
-            var hasTooltip = hasTooltip
-            
+
             @Suppress("DEPRECATION")
             if (type != null)
                 result = result.withType(type.asMaterial()!!)
-            
+
             if (amount != null)
                 result.amount = amount
-            
-            if (name != null) {
-                hasTooltip = true
-                result.setData(DataComponentTypes.ITEM_NAME, name)
+
+            // setting name or lore implicitly enables the tooltip
+            val tooltip = hasTooltip ?: if (name != null || lore != null) true else null
+
+            result.editMeta { meta ->
+                if (name != null)
+                    meta.itemName(name)
+                if (customName != null)
+                    meta.displayName(customName)
+                if (lore != null)
+                    meta.lore(lore.map(ComponentUtils::withoutPreFormatting))
+                if (tooltip != null)
+                    meta.isHideTooltip = !tooltip
+                if (hasGlint != null)
+                    meta.setEnchantmentGlintOverride(hasGlint)
             }
-            
-            if (lore != null) {
-                hasTooltip = true
-                result.setData(DataComponentTypes.LORE, lore(lore.map(ComponentUtils::withoutPreFormatting)))
-            }
-            
-            if (hasTooltip != null) {
-                val prev = result.getData(DataComponentTypes.TOOLTIP_DISPLAY)
-                val new = tooltipDisplay().apply {
-                    hideTooltip(!hasTooltip)
-                    // individual hidden components are only needed if tooltip is shown
-                    if (hasTooltip) {
-                        hiddenComponents(prev?.hiddenComponents() ?: emptySet())
-                    }
-                }
-                result.setData(DataComponentTypes.TOOLTIP_DISPLAY, new)
-            }
-            
-            for ((type, value) in dataTypes) {
-                when (type) {
-                    is DataComponentType.Valued<*> -> result.setData(type, value ?: continue)
-                    is DataComponentType.NonValued -> {
-                        value as Boolean? ?: continue
-                        if (value) {
-                            result.setData(type)
-                        } else {
-                            result.unsetData(type)
-                        }
-                    }
-                    
-                    else -> throw UnsupportedOperationException()
-                }
-            }
-            
+
             ItemWrapper(result)
         }
     }
-    
-    @Suppress("UNCHECKED_CAST")
-    private fun <T : Any> ItemStack.setData(type: DataComponentType.Valued<T>, value: Any) {
-        setData(type, value as T)
-    }
-    
+
 }

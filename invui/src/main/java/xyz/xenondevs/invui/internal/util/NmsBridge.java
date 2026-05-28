@@ -1,7 +1,6 @@
 package xyz.xenondevs.invui.internal.util;
 
 import com.mojang.serialization.Dynamic;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
@@ -9,15 +8,13 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.util.datafix.fixes.References;
-import net.minecraft.world.item.component.BundleContents;
+import org.bukkit.Material;
 import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.craftbukkit.util.CraftMagicNumbers;
 import org.bukkit.inventory.ItemStack;
-import org.jspecify.annotations.Nullable;
 
 import java.io.DataInputStream;
 import java.io.InputStream;
-import java.util.ArrayList;
 
 /**
  * Narrow NMS-backed helper for two operations PacketEvents does not support
@@ -58,32 +55,19 @@ public final class NmsBridge {
     }
 
     /**
-     * Updates the selected-item index of a bundle in place. No-op if the
-     * stack is not a bundle.
+     * Creates a new {@link ItemStack} of {@code targetType}, applying the data
+     * component patch of {@code original} on top of the target type's default
+     * components. This makes the result look like {@code original} while being a
+     * different item type.
+     * <p>
+     * Replaces the data-component-registry iteration used on newer API versions,
+     * which is unavailable on 1.21.1.
      */
-    public static void setBundleSelectedIndex(ItemStack bundle, int index) {
-        var nms = CraftItemStack.unwrap(bundle);
-        var contents = nms.get(DataComponents.BUNDLE_CONTENTS);
-        if (contents == null) return;
-
-        var mutable = new BundleContents.Mutable(contents);
-        mutable.toggleSelectedItem(index);
-        nms.set(DataComponents.BUNDLE_CONTENTS, mutable.toImmutable());
-    }
-
-    /**
-     * Removes the item at the bundle's selected index and returns it. Null
-     * if the bundle is empty or has no contents component.
-     */
-    public static @Nullable ItemStack takeBundleSelected(ItemStack bundle) {
-        var nms = CraftItemStack.unwrap(bundle);
-        var contents = nms.get(DataComponents.BUNDLE_CONTENTS);
-        if (contents == null || contents.isEmpty()) return null;
-
-        int index = Math.clamp(contents.getSelectedItemIndex(), 0, contents.size() - 1);
-        var items = new ArrayList<>(contents.items());
-        var taken = items.remove(index);
-        nms.set(DataComponents.BUNDLE_CONTENTS, new BundleContents(items));
-        return CraftItemStack.asBukkitCopy(taken.create());
+    public static ItemStack asType(ItemStack original, Material targetType) {
+        var nmsOriginal = CraftItemStack.asNMSCopy(original);
+        var targetItem = CraftMagicNumbers.getItem(targetType);
+        var result = new net.minecraft.world.item.ItemStack(targetItem, original.getAmount());
+        result.applyComponents(nmsOriginal.getComponentsPatch());
+        return CraftItemStack.asBukkitCopy(result);
     }
 }

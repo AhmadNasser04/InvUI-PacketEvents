@@ -2,7 +2,6 @@
 
 package xyz.xenondevs.invui.dsl
 
-import io.papermc.paper.datacomponent.DataComponentBuilder
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.inventory.ItemStack
@@ -88,32 +87,6 @@ infix fun ProviderDslProperty<in ItemProvider>.by(itemStack: ItemStack): Unit =
 @ExperimentalDslApi
 infix fun ProviderDslProperty<in ItemProvider>.by(itemStack: Provider<ItemStack>): Unit =
     by(itemStack.map(::ItemWrapper))
-
-/**
- * Sets this data component property from a [DataComponentBuilder].
- *
- * ```
- * data[DataComponentTypes.LORE] by lore(listOf(Component.text("Line 1")))
- * ```
- */
-@Suppress("UnstableApiUsage")
-@JvmName("dataComponentValueByBuilder")
-@ExperimentalDslApi
-infix fun <T : Any> ProviderDslProperty<in T>.by(valueBuilder: DataComponentBuilder<T>): Unit =
-    by(valueBuilder.build())
-
-/**
- * Binds this data component property to a reactive [Provider] of [DataComponentBuilder]s.
- *
- * ```
- * data[DataComponentTypes.LORE] by myLoreBuilderProvider // Provider<DataComponentBuilder<ItemLore>>
- * ```
- */
-@Suppress("UnstableApiUsage")
-@JvmName("dataComponentValueByBuilderProvider")
-@ExperimentalDslApi
-infix fun <T : Any> ProviderDslProperty<in T>.by(valueBuilder: Provider<DataComponentBuilder<T>>): Unit =
-    by(valueBuilder.map(DataComponentBuilder<T>::build))
 
 /**
  * A DSL property backed by a [Provider]. Can be set to a static value or bound to a reactive

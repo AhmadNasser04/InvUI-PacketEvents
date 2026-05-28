@@ -139,7 +139,7 @@ public final class VirtualInventoryManager {
         inventories.remove(inventory.getUuid(), inventory);
         Bukkit.getAsyncScheduler().runNow(
             InvUI.getInstance().getPlugin(),
-            _ -> getSaveFile(inventory).delete()
+            $ -> getSaveFile(inventory).delete()
         );
     }
     

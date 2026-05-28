@@ -36,8 +36,8 @@ class InventoryTest {
     
     private static Stream<Arguments> updateReasons() {
         var invWithNoopHandlers = new VirtualInventory(5);
-        invWithNoopHandlers.addPostUpdateHandler(_ -> {});
-        invWithNoopHandlers.addPreUpdateHandler(_ -> {});
+        invWithNoopHandlers.addPostUpdateHandler($ -> {});
+        invWithNoopHandlers.addPreUpdateHandler($ -> {});
         
         return Stream.of(
             Arguments.of(
@@ -57,8 +57,8 @@ class InventoryTest {
     
     private static Stream<Arguments> unsuppressedUpdateReasons() {
         var invWithNoopHandlers = new VirtualInventory(5);
-        invWithNoopHandlers.addPostUpdateHandler(_ -> {});
-        invWithNoopHandlers.addPreUpdateHandler(_ -> {});
+        invWithNoopHandlers.addPostUpdateHandler($ -> {});
+        invWithNoopHandlers.addPreUpdateHandler($ -> {});
         
         return Stream.of(
             Arguments.of(

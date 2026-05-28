@@ -33,7 +33,7 @@ public final class WeakIdentityToIntMap<K> {
     public void putAssertAbsent(K key, int value) {
         expunge();
         int hash = System.identityHashCode(key);
-        List<Entry<K>> bucket = buckets.computeIfAbsent(hash, _ -> new ArrayList<>(2));
+        List<Entry<K>> bucket = buckets.computeIfAbsent(hash, $ -> new ArrayList<>(2));
         assert bucket.stream().noneMatch(e -> e.get() == key) : "Key already present in map";
         bucket.add(new Entry<>(key, value, hash, queue));
     }
