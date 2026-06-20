@@ -302,6 +302,7 @@ internal class ItemProviderDslImpl(
     private var _type = provider<ItemType?>(null)
     private var _amount = provider<Int?>(null)
     private var _name = provider<Component?>(null)
+    private var _customName = provider<Component?>(null)
     private var _lore = provider<List<Component>?>(null)
     private var _hasTooltip = provider<Boolean?>(null)
     
@@ -315,20 +316,20 @@ internal class ItemProviderDslImpl(
         get() = ProviderDslProperty(::_amount)
     override val name: ProviderDslProperty<Component?>
         get() = ProviderDslProperty(::_name)
+    override val customName: ProviderDslProperty<Component?>
+        get() = ProviderDslProperty(::_customName)
     override val lore: ProviderDslProperty<List<Component>?>
         get() = ProviderDslProperty(::_lore)
     override val hasTooltip: ProviderDslProperty<Boolean?>
         get() = ProviderDslProperty(::_hasTooltip)
-    override val customName: ProviderDslProperty<Component?>
-        get() = data[DataComponentTypes.CUSTOM_NAME]
     override val hasGlint: ProviderDslProperty<Boolean?>
         get() = data[DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE]
     
     fun build(): Provider<ItemProvider> {
         val dataTypeProviders = data.components.map { (type, dslProperty) -> dslProperty.map { type to it } }
         return combinedProvider(
-            _base, _type, _amount, _name, _lore, _hasTooltip, combinedProvider(dataTypeProviders)
-        ) { base, type, amount, name, lore, hasTooltip, dataTypes ->
+            _base, _type, _amount, _name, _customName, _lore, _hasTooltip, combinedProvider(dataTypeProviders)
+        ) { base, type, amount, name, customName, lore, hasTooltip, dataTypes ->
             var result = base.clone()
             var hasTooltip = hasTooltip
             
@@ -341,7 +342,12 @@ internal class ItemProviderDslImpl(
             
             if (name != null) {
                 hasTooltip = true
-                result.setData(DataComponentTypes.ITEM_NAME, name)
+                result.setData(DataComponentTypes.ITEM_NAME, ComponentUtils.withoutPreFormatting(name))
+            }
+            
+            if (customName != null) {
+                hasTooltip = true
+                result.setData(DataComponentTypes.CUSTOM_NAME, ComponentUtils.withoutPreFormatting(customName))
             }
             
             if (lore != null) {
