@@ -229,6 +229,15 @@ sealed interface ItemProviderDsl {
     val hasTooltip: ProviderDslProperty<Boolean?>
     
     /**
+     * A set of [DataComponentTypes][DataComponentType] that are hidden in the tooltip.
+     * 
+     * ```
+     * hiddenComponents by setOf(DataComponentTypes.ENCHANTMENTS)
+     * ```
+     */
+    val hiddenComponents: ProviderDslProperty<Set<DataComponentType>?>
+    
+    /**
      * Access to arbitrary data components beyond the convenience properties.
      *
      * ```
@@ -305,6 +314,7 @@ internal class ItemProviderDslImpl(
     private var _customName = provider<Component?>(null)
     private var _lore = provider<List<Component>?>(null)
     private var _hasTooltip = provider<Boolean?>(null)
+    private var _hiddenComponents = provider<Set<DataComponentType>?>(null)
     
     override val data = DataComponentsPatchImpl()
     
@@ -322,14 +332,16 @@ internal class ItemProviderDslImpl(
         get() = ProviderDslProperty(::_lore)
     override val hasTooltip: ProviderDslProperty<Boolean?>
         get() = ProviderDslProperty(::_hasTooltip)
+    override val hiddenComponents: ProviderDslProperty<Set<DataComponentType>?>
+        get() = ProviderDslProperty(::_hiddenComponents)
     override val hasGlint: ProviderDslProperty<Boolean?>
         get() = data[DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE]
     
     fun build(): Provider<ItemProvider> {
         val dataTypeProviders = data.components.map { (type, dslProperty) -> dslProperty.map { type to it } }
         return combinedProvider(
-            _base, _type, _amount, _name, _customName, _lore, _hasTooltip, combinedProvider(dataTypeProviders)
-        ) { base, type, amount, name, customName, lore, hasTooltip, dataTypes ->
+            _base, _type, _amount, _name, _customName, _lore, _hasTooltip, _hiddenComponents, combinedProvider(dataTypeProviders)
+        ) { base, type, amount, name, customName, lore, hasTooltip, hiddenComponents, dataTypes ->
             var result = base.clone()
             var hasTooltip = hasTooltip
             
@@ -361,7 +373,7 @@ internal class ItemProviderDslImpl(
                     hideTooltip(!hasTooltip)
                     // individual hidden components are only needed if tooltip is shown
                     if (hasTooltip) {
-                        hiddenComponents(prev?.hiddenComponents() ?: emptySet())
+                        hiddenComponents(hiddenComponents ?: prev?.hiddenComponents() ?: emptySet())
                     }
                 }
                 result.setData(DataComponentTypes.TOOLTIP_DISPLAY, new)
