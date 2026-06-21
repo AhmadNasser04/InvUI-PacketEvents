@@ -12,6 +12,7 @@ import org.bukkit.inventory.ItemType
 import xyz.xenondevs.commons.provider.NULL_PROVIDER
 import xyz.xenondevs.commons.provider.Provider
 import xyz.xenondevs.commons.provider.combinedProvider
+import xyz.xenondevs.commons.provider.dsl.ProviderDslProperty
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.internal.util.ComponentUtils
 import xyz.xenondevs.invui.item.ItemProvider
@@ -342,15 +343,20 @@ internal class ItemProviderDslImpl(
         return combinedProvider(
             _base, _type, _amount, _name, _customName, _lore, _hasTooltip, _hiddenComponents, combinedProvider(dataTypeProviders)
         ) { base, type, amount, name, customName, lore, hasTooltip, hiddenComponents, dataTypes ->
-            var result = base.clone()
-            var hasTooltip = hasTooltip
-            
-            @Suppress("DEPRECATION")
-            if (type != null)
-                result = result.withType(type.asMaterial()!!)
+            var result: ItemStack
+            if (base.isEmpty && type != null) {
+                result = type.createItemStack()
+            } else if (type != null) {
+                @Suppress("DEPRECATION")
+                result = base.clone().withType(type.asMaterial()!!)
+            } else {
+                result = base.clone()
+            }
             
             if (amount != null)
                 result.amount = amount
+            
+            var hasTooltip = hasTooltip
             
             if (name != null) {
                 hasTooltip = true
