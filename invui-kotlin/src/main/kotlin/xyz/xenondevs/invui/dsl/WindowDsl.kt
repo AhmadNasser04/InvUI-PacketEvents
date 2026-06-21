@@ -95,7 +95,6 @@ inline fun mergedWindow(viewer: Player, window: NormalMergedWindowDsl.() -> Unit
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface WindowOpenDsl
 
@@ -110,7 +109,6 @@ interface WindowOpenDsl
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface WindowCloseDsl {
     
@@ -130,7 +128,6 @@ interface WindowCloseDsl {
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface WindowOutsideClickDsl {
     
@@ -168,7 +165,6 @@ interface WindowOutsideClickDsl {
  * ```
  */
 @ExperimentalDslApi
-@WindowDslMarker
 sealed interface WindowDsl {
     
     /** The player viewing this window. */

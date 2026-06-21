@@ -197,7 +197,6 @@ sealed interface MerchantWindowDsl : SplitWindowDsl {
  * ```
  */
 @ExperimentalDslApi
-@TradeDslMarker
 sealed interface TradeDsl {
     
     /**

@@ -58,7 +58,6 @@ inline fun item(item: ItemDsl.() -> Unit): Item {
  * }
  * ```
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface ClickDsl {
     
@@ -77,7 +76,6 @@ sealed interface ClickDsl {
  * DSL scope available inside [ItemDsl.onBundleSelect] handlers, providing information about
  * a bundle slot selection event.
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface BundleSelectDsl {
     
@@ -107,7 +105,6 @@ sealed interface BundleSelectDsl {
  * }
  * ```
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface ItemDsl {
     

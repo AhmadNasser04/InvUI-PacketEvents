@@ -53,7 +53,6 @@ inline fun craftingWindow(viewer: Player, craftingWindow: CraftingWindowDsl.() -
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface RecipeClickDsl {
     

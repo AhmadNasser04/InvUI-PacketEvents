@@ -164,7 +164,6 @@ infix fun Inventory.with(background: Provider<ItemProvider>): InventoryWithBackg
  *
  * @see GuiDsl
  */
-@GuiDslMarker
 @ExperimentalDslApi
 sealed interface IngredientsDsl {
     

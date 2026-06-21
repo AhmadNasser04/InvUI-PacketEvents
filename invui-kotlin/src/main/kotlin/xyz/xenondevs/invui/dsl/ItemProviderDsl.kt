@@ -119,7 +119,6 @@ inline fun itemProvider(type: ItemType, itemProvider: ItemProviderDsl.() -> Unit
  * }
  * ```
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface ItemProviderDsl {
     
@@ -265,7 +264,6 @@ sealed interface ItemProviderDsl {
  * }
  * ```
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface DataComponentsPatchDsl {
     
