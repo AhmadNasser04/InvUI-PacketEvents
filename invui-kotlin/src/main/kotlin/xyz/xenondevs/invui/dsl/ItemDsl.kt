@@ -5,6 +5,7 @@ package xyz.xenondevs.invui.dsl
 import org.bukkit.entity.Player
 import org.bukkit.event.inventory.ClickType
 import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.dsl.ProviderDslProperty
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.Click
 import xyz.xenondevs.invui.ExperimentalReactiveApi

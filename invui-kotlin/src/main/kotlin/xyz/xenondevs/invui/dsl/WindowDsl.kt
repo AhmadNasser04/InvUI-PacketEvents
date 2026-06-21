@@ -8,6 +8,8 @@ import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.inventory.ItemStack
 import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.dsl.MutableProviderDslProperty
+import xyz.xenondevs.commons.provider.dsl.ProviderDslProperty
 import xyz.xenondevs.commons.provider.mutableProvider
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.ClickEvent

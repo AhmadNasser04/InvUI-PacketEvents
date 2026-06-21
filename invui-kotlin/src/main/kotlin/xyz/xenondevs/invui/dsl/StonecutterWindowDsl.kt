@@ -4,6 +4,7 @@ package xyz.xenondevs.invui.dsl
 
 import org.bukkit.entity.Player
 import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.dsl.MutableProviderDslProperty
 import xyz.xenondevs.commons.provider.mutableProvider
 import xyz.xenondevs.invui.ExperimentalReactiveApi
 import xyz.xenondevs.invui.window.StonecutterWindow
