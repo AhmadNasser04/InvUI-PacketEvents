@@ -2,6 +2,9 @@ package xyz.xenondevs.invui.inventory
 
 import org.bukkit.inventory.ItemStack
 import org.jetbrains.annotations.ApiStatus
+import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.mutableProvider
+import xyz.xenondevs.invui.ExperimentalReactiveApi
 import xyz.xenondevs.invui.item.ItemProvider
 import java.util.function.Function
 
@@ -43,3 +46,15 @@ operator fun Inventory.get(range: IntRange): ObscuredInventory =
 fun Inventory.setVisualizer(visualizer: ((ItemStack?) -> ItemProvider?)?) {
     this.visualizer = if (visualizer != null) Function { itemStack -> visualizer(itemStack) } else null
 }
+
+/**
+ * Creates a [Provider] of up-to-date snapshots of the inventory's contents.
+ * Note that each invocation creates a new provider and that each provider is strongly referenced by the inventory.
+ */
+@ExperimentalReactiveApi
+val VirtualInventory.itemsProvider: Provider<List<ItemStack?>>
+    get() {
+        val items = mutableProvider { items.asList() }
+        addPostUpdateHandler { items.set(this.items.asList()) }
+        return items
+    }
