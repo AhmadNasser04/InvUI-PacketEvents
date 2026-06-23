@@ -7,13 +7,13 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMa
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMapData.MapDecoration;
 import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import net.kyori.adventure.text.Component;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.ItemType;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.internal.network.PacketListener;
-import xyz.xenondevs.invui.internal.util.ItemUtils2;
 import xyz.xenondevs.invui.internal.util.MathUtils;
+import xyz.xenondevs.invui.util.ItemUtils;
 import xyz.xenondevs.invui.window.CartographyWindow;
 import xyz.xenondevs.invui.window.CartographyWindow.MapIcon;
 import xyz.xenondevs.invui.window.CartographyWindow.MapPatch;
@@ -42,7 +42,7 @@ public class CustomCartographyMenu extends CustomContainerMenu {
 
     @Override
     public void setItem(int slot, @Nullable ItemStack item) {
-        if (slot == 0 && item != null && item.getType() != Material.AIR) {
+        if (slot == 0 && !ItemUtils.isEmpty(item)) {
             // Stamp the input map slot with our virtual map id so the client
             // associates this slot with the canvas we stream below.
             ItemStack clone = item.clone();
@@ -50,15 +50,13 @@ public class CustomCartographyMenu extends CustomContainerMenu {
             pe.setComponent(ComponentTypes.MAP_ID, mapId);
             super.setItem(slot, SpigotConversionUtil.toBukkitItemStack(pe));
         } else if (slot == 1 && item != null) {
-            // Slot 1 is rewritten to a marker matching the current view
-            // mode (e.g. PAPER for SMALL view, MAP for DUPLICATE, etc.).
-            Material targetType = switch (view) {
-                case NORMAL -> Material.STONE;
-                case SMALL -> Material.PAPER;
-                case DUPLICATE -> Material.MAP;
-                case LOCK -> Material.GLASS_PANE;
+            var targetType = switch (view) {
+                case NORMAL -> ItemType.STONE;
+                case SMALL -> ItemType.PAPER;
+                case DUPLICATE -> ItemType.MAP;
+                case LOCK -> ItemType.GLASS_PANE;
             };
-            super.setItem(slot, ItemUtils2.asType(item, targetType));
+            super.setItem(slot, ItemUtils.asType(item, targetType));
         } else {
             super.setItem(slot, item);
         }

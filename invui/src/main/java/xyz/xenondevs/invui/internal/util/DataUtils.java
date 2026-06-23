@@ -14,15 +14,8 @@ import org.bukkit.inventory.ItemStack;
 
 import java.io.*;
 
-/**
- * Low-level binary I/O helpers used by {@link xyz.xenondevs.invui.inventory.VirtualInventory}
- * serialization. NMS-backed NBT serialization was removed in favour of
- * {@link org.bukkit.inventory.ItemStack#serializeAsBytes()} (Bukkit public API).
- */
 public final class DataUtils {
-
     private DataUtils() {}
-
     public static byte[] readByteArray(DataInputStream din) throws IOException {
         int size = din.readInt();
         byte[] array = new byte[size];

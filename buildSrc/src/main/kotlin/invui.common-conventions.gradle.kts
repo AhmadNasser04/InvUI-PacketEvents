@@ -9,7 +9,7 @@ plugins {
 val libs = the<LibrariesForLibs>()
 
 group = "xyz.xenondevs.invui"
-version = "2.0.0-PacketEvents"
+version = "2.2.0-PacketEvents"
 
 repositories {
     mavenCentral()

@@ -2,6 +2,7 @@
 
 package xyz.xenondevs.invui.dsl
 
+import org.bukkit.entity.Player
 import xyz.xenondevs.commons.provider.Provider
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.ExperimentalReactiveApi
@@ -98,6 +99,18 @@ inline fun IngredientsDsl.gui(vararg structure: String, gui: GuiDsl.() -> Unit):
 }
 
 /**
+ * DSL scope available inside [GuiDsl.onBundleSelect] handlers, providing information about
+ * a bundle slot selection event on a GUI slot.
+ */
+@ExperimentalDslApi
+interface GuiBundleSelectDsl : BundleSelectDsl {
+    
+    /** The GUI slot index where the bundle is located. */
+    val guiSlot: Int
+    
+}
+
+/**
  * DSL scope for configuring a [Gui].
  *
  * Extends [IngredientsDsl], so ingredient mappings (e.g. `'x' by someItem`) can be defined directly
@@ -140,14 +153,36 @@ sealed interface GuiDsl : IngredientsDsl {
     /**
      * Whether to ignore inventory slots that are visually obscured (e.g. by another GUI layered on top).
      *
-     * Defaults to `false`. Can be set to a static value or bound to a [Provider]:
+     * Defaults to `true`. Can be set to a static value or bound to a [Provider]:
      * ```
-     * ignoreObscuredInventorySlots by true
+     * ignoreObscuredInventorySlots by false
      * ```
      */
     val ignoreObscuredInventorySlots: ProviderDslProperty<Boolean>
+
+    /**
+     * Registers a bundle selection handler that is called when a player selects a slot
+     * in a bundle's tooltip on a GUI slot. Multiple handlers can be registered and will all be
+     * called in order.
+     *
+     * ```
+     * onBundleSelect {
+     *     player.sendMessage("Selected bundle slot $bundleSlot at gui slot $guiSlot")
+     * }
+     * ```
+     *
+     * @see GuiBundleSelectDsl
+     */
+    fun onBundleSelect(handler: GuiBundleSelectDsl.() -> Unit)
     
 }
+
+@ExperimentalDslApi
+internal class GuiBundleSelectDslImpl(
+    override val player: Player,
+    override val guiSlot: Int,
+    override val bundleSlot: Int
+) : GuiBundleSelectDsl
 
 @PublishedApi
 @ExperimentalDslApi
@@ -164,7 +199,7 @@ internal abstract class GuiDslImpl<G : Gui, B : Gui.Builder<G, B>>(
     
     private var _background = provider<ItemProvider?>(null)
     private var _frozen = provider(false)
-    private var _ignoreObscuredInventorySlots = provider(false)
+    private var _ignoreObscuredInventorySlots = provider(true)
     
     override val background: ProviderDslProperty<ItemProvider?>
         get() = ProviderDslProperty(::_background)
@@ -172,6 +207,12 @@ internal abstract class GuiDslImpl<G : Gui, B : Gui.Builder<G, B>>(
         get() = ProviderDslProperty(::_frozen)
     override val ignoreObscuredInventorySlots: ProviderDslProperty<Boolean>
         get() = ProviderDslProperty(::_ignoreObscuredInventorySlots)
+    
+    private val bundleSelectHandlers = mutableListOf<GuiBundleSelectDsl.() -> Unit>()
+    
+    override fun onBundleSelect(handler: GuiBundleSelectDsl.() -> Unit) {
+        bundleSelectHandlers += handler
+    }
     
     fun build(): G {
         val gui = createBuilder().apply(::applyToBuilder).build()
@@ -186,6 +227,12 @@ internal abstract class GuiDslImpl<G : Gui, B : Gui.Builder<G, B>>(
                 applyPreset(preset)
             }
             applyPreset(ingredients.build())
+            
+            for (handler in bundleSelectHandlers) {
+                addBundleSelectHandler { player, guiSlot, bundleSlot ->
+                    GuiBundleSelectDslImpl(player, guiSlot, bundleSlot).handler()
+                }
+            }
             
             setBackground(_background)
             setFrozen(_frozen)

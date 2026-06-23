@@ -1,5 +1,6 @@
 package xyz.xenondevs.invui.window;
 
+import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntLinkedOpenHashSet;
@@ -33,11 +34,14 @@ import xyz.xenondevs.invui.inventory.InventorySlot;
 import xyz.xenondevs.invui.inventory.ReferencingInventory;
 import xyz.xenondevs.invui.inventory.event.PlayerUpdateReason;
 import xyz.xenondevs.invui.inventory.event.UpdateReason;
+import xyz.xenondevs.invui.item.ItemProvider;
 import xyz.xenondevs.invui.state.MutableProperty;
+import xyz.xenondevs.invui.util.InventoryUtils;
 import xyz.xenondevs.invui.util.ItemUtils;
 
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -54,6 +58,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     private static final Component DEFAULT_TITLE = Component.empty();
     private static final boolean DEFAULT_CLOSEABLE = true;
     private static final int DEFAULT_WINDOW_STATE = 0;
+    static final Function<@Nullable ItemStack, @Nullable ItemProvider> DEFAULT_CURSOR_VISUALIZER = _ -> null;
     
     protected final M menu;
     private final Player viewer;
@@ -62,6 +67,8 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     private final List<Consumer<? super ClickEvent>> outsideClickHandlers = new ArrayList<>(0);
     private final List<Consumer<? super Integer>> windowStateChangeHandlers = new ArrayList<>(0);
     private Supplier<? extends @Nullable Window> fallbackWindow = () -> null;
+    private final MutableProperty<Function<@Nullable ItemStack, @Nullable ItemProvider>> cursorVisualizer;
+    private Function<@Nullable ItemStack, @Nullable ItemProvider> currentCursorVisualizer;
     private Supplier<? extends Component> titleSupplier;
     private final MutableProperty<Boolean> closeable;
     private final MutableProperty<Integer> serverWindowState;
@@ -86,13 +93,16 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         int size,
         M menu,
         MutableProperty<Boolean> closeable,
-        MutableProperty<Integer> windowState
+        MutableProperty<Integer> windowState,
+        MutableProperty<Function<@Nullable ItemStack, @Nullable ItemProvider>> cursorVisualizer
     ) {
         this.menu = menu;
         this.viewer = viewer;
         this.titleSupplier = titleSupplier;
         this.closeable = closeable;
         this.serverWindowState = windowState;
+        this.cursorVisualizer = cursorVisualizer;
+        this.currentCursorVisualizer = FuncUtils.getSafely(cursorVisualizer, DEFAULT_CURSOR_VISUALIZER);
         this.size = size;
         this.dirtySlots = new BitSet(size);
         this.structurallyDirtySlots = new BitSet(size);
@@ -103,8 +113,10 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
             .collect(Collectors.toCollection(ArrayList::new));
         
         serverWindowState.observeWeak(this, thisRef -> thisRef.updateAndFlush(UpdateType.DIRTY, serverWindowState.get()));
+        cursorVisualizer.observeWeak(this, AbstractWindow::onCursorVisualizerChange);
         
         menu.setWindow(this);
+        applyCursorVisualizer();
     }
     
     protected void update(int slot, boolean structural) {
@@ -303,6 +315,26 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         activeTitle = title;
 
         menu.sendOpenPacket(Languages.getInstance().localized(viewer, title));
+    }
+    
+    private void onCursorVisualizerChange() {
+        currentCursorVisualizer = FuncUtils.getSafely(cursorVisualizer, DEFAULT_CURSOR_VISUALIZER);
+        applyCursorVisualizer();
+    }
+    
+    private void applyCursorVisualizer() {
+        var visualizer = currentCursorVisualizer;
+        if (visualizer != DEFAULT_CURSOR_VISUALIZER) {
+            menu.setCursorVisualizer(nms -> {
+                var bukkit = ItemUtils.takeUnlessEmpty(SpigotConversionUtil.toBukkitItemStack(nms));
+                var visualization = FuncUtils.applySafely(visualizer, bukkit, null);
+                return visualization != null
+                    ? SpigotConversionUtil.fromBukkitItemStack(visualization.get(getLocale()))
+                    : nms;
+            });
+        } else {
+            menu.setCursorVisualizer(Function.identity());
+        }
     }
     
     @Override
@@ -535,17 +567,15 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         // simulate drag results & fire event
         var oldCursor = reason.player().getItemOnCursor().clone();
         var newCursor = oldCursor.clone();
-        var results = InventoryUtils.simulateItemDrag(reason.clickType(), view, rawSlots, newCursor);
+        var results = InventoryUtils2.simulateItemDrag(reason.clickType(), view, rawSlots, newCursor);
         return !new InventoryDragEvent(view, newCursor, oldCursor, reason.clickType() == ClickType.RIGHT, results).callEvent();
     }
     
     @Override
     public void open() {
         Player viewer = getViewer();
-        if (isOpen)
+        if (isOpen || viewer.isSleeping() || !viewer.isValid() || !viewer.isConnected())
             return;
-        if (!viewer.isValid())
-            throw new IllegalStateException("Viewer is not valid");
         if (isInOpeningContext.get())
             throw new IllegalStateException("Opening a window is not allowed to trigger opening another window.");
         if (isInCloseHandlerContext.get() > 0)
@@ -727,6 +757,21 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     }
     
     @Override
+    public void setCursorVisualizer(Function<@Nullable ItemStack, @Nullable ItemProvider> cursorVisualizer) {
+        this.cursorVisualizer.set(cursorVisualizer);
+    }
+    
+    @Override
+    public Function<@Nullable ItemStack, @Nullable ItemProvider> getCursorVisualizer() {
+        return currentCursorVisualizer;
+    }
+    
+    @Override
+    public MutableProperty<Function<@Nullable ItemStack, @Nullable ItemProvider>> getCursorVisualizerProperty() {
+        return cursorVisualizer;
+    }
+    
+    @Override
     public void setOutsideClickHandlers(List<? extends Consumer<ClickEvent>> outsideClickHandlers) {
         this.outsideClickHandlers.clear();
         this.outsideClickHandlers.addAll(outsideClickHandlers);
@@ -829,6 +874,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         private List<Consumer<? super Integer>> windowStateChangeHandlers = new ArrayList<>(0);
         private List<Consumer<? super W>> modifiers = new ArrayList<>(0);
         private Supplier<? extends @Nullable Window> fallbackWindow = () -> DEFAULT_FALLBACK_WINDOW;
+        protected MutableProperty<Function<@Nullable ItemStack, @Nullable ItemProvider>> cursorVisualizer = MutableProperty.of(DEFAULT_CURSOR_VISUALIZER);
         
         @Override
         public S setViewer(Player viewer) {
@@ -876,6 +922,12 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         @Override
         public S setFallbackWindow(Supplier<? extends @Nullable Window> fallbackWindow) {
             this.fallbackWindow = fallbackWindow;
+            return (S) this;
+        }
+        
+        @Override
+        public S setCursorVisualizer(MutableProperty<Function<@Nullable ItemStack, @Nullable ItemProvider>> cursorVisualizer) {
+            this.cursorVisualizer = cursorVisualizer;
             return (S) this;
         }
         
@@ -966,6 +1018,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
                 var clone = (AbstractBuilder<W, S>) super.clone();
                 clone.closeable = MutableProperty.of(closeable.get());
                 clone.windowState = MutableProperty.of(windowState.get());
+                clone.cursorVisualizer = MutableProperty.of(cursorVisualizer.get());
                 clone.openHandlers = new ArrayList<>(openHandlers);
                 clone.closeHandlers = new ArrayList<>(closeHandlers);
                 clone.outsideClickHandlers = new ArrayList<>(outsideClickHandlers);

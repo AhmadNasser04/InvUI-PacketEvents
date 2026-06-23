@@ -50,6 +50,7 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * A packet-based container menu.
@@ -100,6 +101,7 @@ public abstract class CustomContainerMenu {
     private org.bukkit.inventory.@Nullable ItemStack lastSentCarried;
     /** Force-resend flag for the cursor, paralleling {@link #dirtySlots}. */
     private boolean carriedDirty = true;
+    private Function<? super ItemStack, ? extends ItemStack> cursorVisualizer = Function.identity();
 
     protected final int[] dataSlots;
     protected final int[] remoteDataSlots;
@@ -198,6 +200,11 @@ public abstract class CustomContainerMenu {
         return copyBukkitItem(carried);
     }
 
+    public void setCursorVisualizer(Function<? super ItemStack, ? extends ItemStack> cursorVisualizer) {
+        this.cursorVisualizer = cursorVisualizer;
+        carriedDirty = true;
+    }
+
     private static ItemStack fromBukkit(org.bukkit.inventory.@Nullable ItemStack item) {
         if (item == null || item.getType().isAir())
             return ItemStack.EMPTY;
@@ -275,7 +282,7 @@ public abstract class CustomContainerMenu {
                 ));
             }
             if (finalSendCarried) {
-                packets.add(new WrapperPlayServerSetCursorItem(fromBukkit(carriedSnapshot)));
+                packets.add(new WrapperPlayServerSetCursorItem(visualizeCarried(carriedSnapshot)));
             }
             for (int i = 0; i < finalDataCount; i++) {
                 packets.add(new WrapperPlayServerWindowProperty(cId, changedDataIndices[i], changedDataValues[i]));
@@ -361,7 +368,7 @@ public abstract class CustomContainerMenu {
                         cId, sparseStateIds[i], sparseSlots[i], fromBukkit(sparseBukkit[i])
                     ));
                 }
-                packets.add(new WrapperPlayServerSetCursorItem(fromBukkit(carriedSnapshot)));
+                packets.add(new WrapperPlayServerSetCursorItem(visualizeCarried(carriedSnapshot)));
                 for (int i = 0; i < dataSnapshot.length; i++) {
                     packets.add(new WrapperPlayServerWindowProperty(cId, i, dataSnapshot[i]));
                 }
@@ -381,7 +388,7 @@ public abstract class CustomContainerMenu {
                 var contents = new ArrayList<ItemStack>(bukkitSnapshot.length);
                 for (var b : bukkitSnapshot)
                     contents.add(fromBukkit(b));
-                ItemStack peCarried = fromBukkit(carriedSnapshot);
+                ItemStack peCarried = visualizeCarried(carriedSnapshot);
                 packets.add(new WrapperPlayServerWindowItems(cId, windowItemsStateId, contents, peCarried));
                 packets.add(new WrapperPlayServerSetCursorItem(peCarried));
                 for (int i = 0; i < dataSnapshot.length; i++) {
@@ -433,6 +440,10 @@ public abstract class CustomContainerMenu {
             return copyBukkitItem(inv.getItem(9 + lowerSlot));
         }
         return copyBukkitItem(inv.getItem(lowerSlot - 27));
+    }
+
+    private ItemStack visualizeCarried(org.bukkit.inventory.@Nullable ItemStack item) {
+        return cursorVisualizer.apply(fromBukkit(item));
     }
 
     private void markRemoteSynced() {
@@ -558,9 +569,13 @@ public abstract class CustomContainerMenu {
      */
     protected UpdateType processPacket(PacketWrapper<?> packet) {
         if (packet instanceof WrapperPlayClientClickWindowButton btn) {
+            if (btn.getWindowId() != containerId)
+                return UpdateType.NONE;
             return handleButtonClick(btn.getButtonId());
         }
         if (packet instanceof WrapperPlayClientClickWindow click) {
+            if (click.getWindowId() != containerId)
+                return UpdateType.NONE;
             return handleClick(click);
         }
         if (packet instanceof WrapperPlayClientSelectBundleItem bundle) {
