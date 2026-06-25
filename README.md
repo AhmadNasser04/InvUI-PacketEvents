@@ -39,11 +39,27 @@ across supported Minecraft versions without per-version compilation.
 
 ## Maven
 
+This fork is published to [GitHub Packages](https://github.com/AhmadNasser04/InvUI-PacketEvents/packages).
+GitHub Packages requires authentication even for downloads, so consumers must
+supply a personal access token with the `read:packages` scope.
+
 ```xml
 <repository>
-    <id>xenondevs</id>
-    <url>https://repo.xenondevs.xyz/releases</url>
+    <id>github</id>
+    <url>https://maven.pkg.github.com/AhmadNasser04/InvUI-PacketEvents</url>
 </repository>
+```
+
+Add matching credentials to your `~/.m2/settings.xml`:
+
+```xml
+<servers>
+    <server>
+        <id>github</id>
+        <username>YOUR_GITHUB_USERNAME</username>
+        <password>YOUR_GITHUB_TOKEN</password>
+    </server>
+</servers>
 ```
 
 ```xml
@@ -52,6 +68,23 @@ across supported Minecraft versions without per-version compilation.
     <artifactId>invui</artifactId>
     <version>VERSION</version>
 </dependency>
+```
+
+For Gradle (Kotlin DSL):
+
+```kotlin
+repositories {
+    maven("https://maven.pkg.github.com/AhmadNasser04/InvUI-PacketEvents") {
+        credentials {
+            username = providers.gradleProperty("gpr.user").orNull ?: System.getenv("GITHUB_ACTOR")
+            password = providers.gradleProperty("gpr.key").orNull ?: System.getenv("GITHUB_TOKEN")
+        }
+    }
+}
+
+dependencies {
+    implementation("xyz.xenondevs.invui:invui:VERSION")
+}
 ```
 
 Check out the [InvUI documentation](https://xenondevs.xyz/docs/invui/) for more information.

@@ -54,11 +54,11 @@ tasks {
 publishing {
     repositories {
         maven {
-            name = "nexus-public"
-            url = uri("https://repo.striveservices.org/nexus-public")
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/AhmadNasser04/InvUI-PacketEvents")
             credentials {
-                username = "Panda"
-                password = System.getenv("PANDA_TOKEN")
+                username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.username").orNull
+                password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.password").orNull
             }
         }
     }
