@@ -375,7 +375,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
             }
             
             var bukkitEvent = new InventoryClickEvent(
-                getViewer().getOpenInventory(),
+                menu.getBukkitView(),
                 InventoryType.SlotType.OUTSIDE,
                 -999,
                 click.clickType(),
@@ -547,8 +547,9 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         var rawSlots = new IntArrayList();
         int off = 0;
         if (slotsByInventory.isEmpty()) {
-            // only the player inventory is involved, so we can use the existing view
-            view = reason.player().getOpenInventory();
+            // only the player inventory is involved, so we can use this window's view
+            // (its empty top inventory maps raw slots directly onto the player inventory)
+            view = menu.getBukkitView();
         } else {
             // otherwise, a composite inventory that includes all affected non-player inventories is used
             var bigComposite = new CompositeInventory(slotsByInventory.keySet());

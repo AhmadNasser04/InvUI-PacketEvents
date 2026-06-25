@@ -3,13 +3,12 @@ import org.gradle.accessors.dm.LibrariesForLibs
 plugins {
     `java-library`
     `maven-publish`
-    id("io.papermc.paperweight.userdev")
 }
 
 val libs = the<LibrariesForLibs>()
 
 group = "xyz.xenondevs.invui"
-version = "2.2.0-PacketEvents"
+version = "2.2.1-PacketEvents"
 
 repositories {
     mavenCentral()
@@ -19,7 +18,7 @@ repositories {
 }
 
 dependencies {
-    paperweight.paperDevBundle(libs.versions.paper.get())
+    compileOnly(libs.paper.api)
 
     compileOnly(libs.packetevents.spigot)
     implementation(libs.jetbrains.annotations)
@@ -39,10 +38,6 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
     }
-}
-
-paperweight {
-    addServerDependencyTo.add(configurations.named(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME))
 }
 
 tasks {

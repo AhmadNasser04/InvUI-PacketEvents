@@ -10,9 +10,7 @@ import xyz.xenondevs.invui.Click;
 import xyz.xenondevs.invui.InvUI;
 import xyz.xenondevs.invui.internal.util.DataUtils;
 import xyz.xenondevs.invui.internal.util.FakeInventoryView;
-import xyz.xenondevs.invui.internal.util.NmsBridge;
 import xyz.xenondevs.invui.item.ItemProvider;
-import xyz.xenondevs.invui.internal.util.NmsBridge;
 import xyz.xenondevs.invui.util.ItemUtils;
 
 import java.io.*;
@@ -239,20 +237,11 @@ public final class VirtualInventory extends Inventory {
                 }
             }
 
-            case 5 -> {
-                int dataVersion = din.readInt();
-                int size = din.readInt();
-                var itemsMask = BitSet.valueOf(din.readNBytes((size + 7) / 8)); // ceil(size / 8)
-                var itemsIn = new BufferedInputStream(new GZIPInputStream(din));
-
-                items = new ItemStack[size];
-                for (int i = 0; i < size; i++) {
-                    if (!itemsMask.get(i))
-                        continue;
-
-                    items[i] = NmsBridge.readV5Item(itemsIn, dataVersion);
-                }
-            }
+            case 5 -> throw new UnsupportedOperationException(
+                "VirtualInventory v5 data was written only by the legacy NMS-based InvUI 2.0 and "
+                    + "requires Mojang's data fixers to migrate. This PacketEvents build has no access "
+                    + "to them. Re-serialize the data with a legacy NMS InvUI version (which writes it "
+                    + "as v6) before loading it here.");
 
             default -> throw new UnsupportedOperationException("Unsupported VirtualInventory version: " + id);
         }

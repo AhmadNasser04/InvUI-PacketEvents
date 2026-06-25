@@ -1,8 +1,11 @@
 package xyz.xenondevs.invui.internal.util;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.jspecify.annotations.Nullable;
+import xyz.xenondevs.invui.InvUI;
 import xyz.xenondevs.invui.util.ItemUtils;
 
 import java.util.ArrayList;
@@ -12,7 +15,15 @@ import static io.papermc.paper.datacomponent.item.BundleContents.bundleContents;
 
 @SuppressWarnings("UnstableApiUsage")
 public final class ItemUtils2 {
-    
+
+    /**
+     * Stores a bundle's selected slot. The vanilla {@code selectedItem} field of the
+     * {@code minecraft:bundle_contents} component is not exposed by the Paper or PacketEvents
+     * APIs, so the selection is kept in the item's persistent data container instead.
+     */
+    private static final NamespacedKey BUNDLE_SELECTED_SLOT_KEY =
+        new NamespacedKey(InvUI.getInstance().getPlugin(), "bundle_selected_slot");
+
     private ItemUtils2() {}
     
     /**
@@ -219,15 +230,43 @@ public final class ItemUtils2 {
         return amountLeft;
     }
     
+    /**
+     * Removes the item at the bundle's selected slot and returns it, resetting the selection.
+     *
+     * @param bundle the bundle item stack
+     * @return the removed item stack, or null if the bundle is empty or has no contents
+     */
     public static @Nullable ItemStack takeSelectedFromBundle(ItemStack bundle) {
-        return NmsBridge.takeBundleSelected(bundle);
+        var bundleContents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        if (bundleContents == null)
+            return null;
+
+        var contents = new ArrayList<>(bundleContents.contents());
+        if (contents.isEmpty())
+            return null;
+
+        int index = Math.clamp(getSelectedBundleSlot(bundle), 0, contents.size() - 1);
+        ItemStack taken = contents.remove(index);
+
+        bundle.setData(DataComponentTypes.BUNDLE_CONTENTS, bundleContents(contents));
+        clearSelectedBundleSlot(bundle);
+        return taken;
     }
 
     /**
-     * Sets the selected bundle slot.
+     * Sets the selected bundle slot, persisting it in the item (see {@link #BUNDLE_SELECTED_SLOT_KEY}).
      */
     public static void setSelectedBundleSlot(ItemStack bundle, int bundleSlot) {
-        NmsBridge.setBundleSelectedIndex(bundle, bundleSlot);
+        bundle.editPersistentDataContainer(pdc -> pdc.set(BUNDLE_SELECTED_SLOT_KEY, PersistentDataType.INTEGER, bundleSlot));
     }
-    
+
+    private static int getSelectedBundleSlot(ItemStack bundle) {
+        Integer selected = bundle.getPersistentDataContainer().get(BUNDLE_SELECTED_SLOT_KEY, PersistentDataType.INTEGER);
+        return selected == null ? 0 : selected;
+    }
+
+    private static void clearSelectedBundleSlot(ItemStack bundle) {
+        bundle.editPersistentDataContainer(pdc -> pdc.remove(BUNDLE_SELECTED_SLOT_KEY));
+    }
+
 }

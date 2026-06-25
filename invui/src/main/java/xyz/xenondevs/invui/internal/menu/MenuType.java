@@ -1,7 +1,6 @@
 package xyz.xenondevs.invui.internal.menu;
 
 import com.github.retrooper.packetevents.manager.server.ServerVersion;
-import net.minecraft.core.registries.BuiltInRegistries;
 
 public enum MenuType {
     GENERIC_9x1,
@@ -31,11 +30,15 @@ public enum MenuType {
     CARTOGRAPHY_TABLE,
     STONECUTTER;
 
+    /**
+     * Resolves the vanilla menu-registry id for this type on the given server version.
+     * <p>
+     * The constants are declared in the same order as the vanilla {@code minecraft:menu}
+     * registry, so the enum ordinal equals the registry id on 1.21+. The only shift in the
+     * supported range is {@code CRAFTER_3x3}, which was inserted at index 7 in 1.21; on older
+     * versions every type after it is offset by one.
+     */
     public int idFor(ServerVersion version) {
-        int registryId = BuiltInRegistries.MENU.getId(toNms());
-        if (registryId >= 0)
-            return registryId;
-
         int base = baseId();
         if (version.isOlderThan(ServerVersion.V_1_21)) {
             if (this == CRAFTER_3x3)
@@ -91,36 +94,6 @@ public enum MenuType {
             case LOOM -> 1;
             case STONECUTTER -> 1;
             default -> 0;
-        };
-    }
-
-    public net.minecraft.world.inventory.MenuType<?> toNms() {
-        return switch (this) {
-            case GENERIC_9x1 -> net.minecraft.world.inventory.MenuType.GENERIC_9x1;
-            case GENERIC_9x2 -> net.minecraft.world.inventory.MenuType.GENERIC_9x2;
-            case GENERIC_9x3 -> net.minecraft.world.inventory.MenuType.GENERIC_9x3;
-            case GENERIC_9x4 -> net.minecraft.world.inventory.MenuType.GENERIC_9x4;
-            case GENERIC_9x5 -> net.minecraft.world.inventory.MenuType.GENERIC_9x5;
-            case GENERIC_9x6 -> net.minecraft.world.inventory.MenuType.GENERIC_9x6;
-            case GENERIC_3x3 -> net.minecraft.world.inventory.MenuType.GENERIC_3x3;
-            case CRAFTER_3x3 -> net.minecraft.world.inventory.MenuType.CRAFTER_3x3;
-            case ANVIL -> net.minecraft.world.inventory.MenuType.ANVIL;
-            case BEACON -> net.minecraft.world.inventory.MenuType.BEACON;
-            case BLAST_FURNACE -> net.minecraft.world.inventory.MenuType.BLAST_FURNACE;
-            case BREWING_STAND -> net.minecraft.world.inventory.MenuType.BREWING_STAND;
-            case CRAFTING -> net.minecraft.world.inventory.MenuType.CRAFTING;
-            case ENCHANTMENT -> net.minecraft.world.inventory.MenuType.ENCHANTMENT;
-            case FURNACE -> net.minecraft.world.inventory.MenuType.FURNACE;
-            case GRINDSTONE -> net.minecraft.world.inventory.MenuType.GRINDSTONE;
-            case HOPPER -> net.minecraft.world.inventory.MenuType.HOPPER;
-            case LECTERN -> net.minecraft.world.inventory.MenuType.LECTERN;
-            case LOOM -> net.minecraft.world.inventory.MenuType.LOOM;
-            case MERCHANT -> net.minecraft.world.inventory.MenuType.MERCHANT;
-            case SHULKER_BOX -> net.minecraft.world.inventory.MenuType.SHULKER_BOX;
-            case SMITHING -> net.minecraft.world.inventory.MenuType.SMITHING;
-            case SMOKER -> net.minecraft.world.inventory.MenuType.SMOKER;
-            case CARTOGRAPHY_TABLE -> net.minecraft.world.inventory.MenuType.CARTOGRAPHY_TABLE;
-            case STONECUTTER -> net.minecraft.world.inventory.MenuType.STONECUTTER;
         };
     }
 

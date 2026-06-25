@@ -21,16 +21,9 @@ import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import it.unimi.dsi.fastutil.ints.IntLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import net.kyori.adventure.text.Component;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import org.bukkit.craftbukkit.entity.CraftPlayer;
-import org.bukkit.craftbukkit.inventory.CraftInventory;
-import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.Click;
@@ -38,6 +31,7 @@ import xyz.xenondevs.invui.InvUI;
 import xyz.xenondevs.invui.internal.network.PacketListener;
 import xyz.xenondevs.invui.internal.util.FakeInventoryView;
 import xyz.xenondevs.invui.internal.util.MathUtils;
+import xyz.xenondevs.invui.inventory.VirtualInventory;
 import xyz.xenondevs.invui.window.Window;
 
 import java.util.ArrayList;
@@ -71,11 +65,23 @@ public abstract class CustomContainerMenu {
         return id;
     }
 
+    /** Empty top inventory shared by every menu's stand-in {@link #view}; never mutated (size 0). */
+    private static final org.bukkit.inventory.Inventory EMPTY_VIEW_TOP = new VirtualInventory(0).asBukkitInventory();
+
     protected final MenuType menuType;
     protected final int containerId;
     protected final Player player;
-    private final ServerPlayer serverPlayer;
-    private final ContainerMenuProxy proxy;
+    /**
+     * Whether this menu is currently the player's active container, i.e. {@link #open} has run
+     * and {@link #handleClosed} has not. Replaces the previous NMS {@code serverPlayer.containerMenu}
+     * identity check now that no server-side menu is pinned.
+     */
+    private boolean active;
+    /**
+     * Stand-in Bukkit {@link InventoryView} for this menu, used only when firing Bukkit inventory
+     * events. Its top inventory is empty, so a raw slot maps directly onto the player inventory.
+     */
+    private final InventoryView view;
     private @Nullable Window window;
 
     /**
@@ -123,7 +129,7 @@ public abstract class CustomContainerMenu {
     protected CustomContainerMenu(MenuType menuType, Player player) {
         this.menuType = menuType;
         this.player = player;
-        this.serverPlayer = ((CraftPlayer) player).getHandle();
+        this.view = new FakeInventoryView(player, EMPTY_VIEW_TOP);
         this.containerId = nextContainerId();
 
         int size = menuType.size() + LOWER_INVENTORY_SIZE;
@@ -138,8 +144,15 @@ public abstract class CustomContainerMenu {
         this.dataSlots = new int[dataSize];
         this.remoteDataSlots = new int[dataSize];
         Arrays.fill(this.remoteDataSlots, Integer.MIN_VALUE); // force initial send
+    }
 
-        this.proxy = new ContainerMenuProxy();
+    /**
+     * Returns this menu's stand-in Bukkit {@link InventoryView}. The view exists purely so the
+     * window can fire Bukkit inventory events with a sensible view; the server has no real
+     * container open while this packet-based menu is active.
+     */
+    public InventoryView getBukkitView() {
+        return view;
     }
 
     private void loadPlayerInventoryIntoLowerSlots() {
@@ -187,14 +200,16 @@ public abstract class CustomContainerMenu {
 
     public void setCursor(org.bukkit.inventory.@Nullable ItemStack item) {
         carried = copyBukkitItem(item);
-        if (serverPlayer.containerMenu == serverPlayer.inventoryMenu) {
+        // While this menu is active the cursor is tracked internally and synced via packets;
+        // otherwise it belongs to the real (vanilla) player inventory.
+        if (!active) {
             player.setItemOnCursor(copyBukkitItem(carried));
         }
         carriedDirty = true;
     }
 
     public org.bukkit.inventory.@Nullable ItemStack getCursor() {
-        if (serverPlayer.containerMenu == serverPlayer.inventoryMenu) {
+        if (!active) {
             carried = copyBukkitItem(player.getItemOnCursor());
         }
         return copyBukkitItem(carried);
@@ -459,8 +474,8 @@ public abstract class CustomContainerMenu {
     //<editor-fold desc="lifecycle">
 
     /**
-     * Registers the PacketEvents listeners, pins the NMS proxy menu onto
-     * the player, and sends the open-window sequence.
+     * Registers the PacketEvents listeners, marks this menu as the player's active
+     * container, and sends the open-window sequence.
      */
     public void open(Component title) {
         open(title, List.of());
@@ -489,7 +504,7 @@ public abstract class CustomContainerMenu {
         pl.discard(player, PacketType.Play.Server.SET_SLOT);
         pl.discard(player, PacketType.Play.Server.SET_CURSOR_ITEM);
 
-        serverPlayer.containerMenu = proxy;
+        active = true;
         sendOpenPacket(title, extraInitPackets);
     }
 
@@ -517,12 +532,11 @@ public abstract class CustomContainerMenu {
         pl.stopDiscard(player, PacketType.Play.Server.SET_SLOT);
         pl.stopDiscard(player, PacketType.Play.Server.SET_CURSOR_ITEM);
 
-        // Hand the player back to vanilla's inventory menu and ask vanilla
-        // to resync the player inventory view. We overwrote the lower-inventory
-        // visuals with items[] while the menu was open, so the client needs
-        // fresh SetSlot packets for slots 36..44 of the vanilla inventory menu.
-        if (serverPlayer.containerMenu == proxy) {
-            serverPlayer.containerMenu = serverPlayer.inventoryMenu;
+        // Mark the menu inactive and hand the cursor back to the real player inventory.
+        // We overwrote the lower-inventory visuals with bukkitItems[] while the menu was
+        // open, so ask vanilla to resend the player inventory below.
+        if (active) {
+            active = false;
             player.setItemOnCursor(copyBukkitItem(carried));
         }
         if (cause != InventoryCloseEvent.Reason.OPEN_NEW) {
@@ -606,11 +620,9 @@ public abstract class CustomContainerMenu {
             // Client-initiated close: drive the InvUI close path directly,
             // matching upstream. We bypass Bukkit's event machinery because
             // the client's CLOSE_WINDOW packet was cancelled at the packet
-            // layer, so vanilla never sees it.
+            // layer, so vanilla never sees it. handleClose() routes through
+            // handleClosed(), which clears the active flag.
             getWindowEvents().handleClose(InventoryCloseEvent.Reason.PLAYER);
-            if (serverPlayer.containerMenu == proxy) {
-                serverPlayer.containerMenu = serverPlayer.inventoryMenu;
-            }
         } else {
             sendOpenPacket(title);
         }
@@ -788,63 +800,5 @@ public abstract class CustomContainerMenu {
      * the window state id it corresponds to and the time it was sent.
      */
     private record PingData(int id, long timestamp) {}
-
-    /**
-     * NMS {@link AbstractContainerMenu} we pin onto {@code serverPlayer.containerMenu}
-     * while the InvUI window is open. Its only job is to make vanilla think
-     * a container is open — all broadcast methods are no-ops because we
-     * sync state ourselves via PacketEvents wrappers. Cursor access is
-     * routed through the Bukkit player so it stays in sync with
-     * {@code AbstractGui}'s click handling.
-     */
-    private final class ContainerMenuProxy extends AbstractContainerMenu {
-
-        private final Inventory bukkitInventory = new CraftInventory(new SimpleContainer(0));
-
-        ContainerMenuProxy() {
-            super(CustomContainerMenu.this.menuType.toNms(), CustomContainerMenu.this.containerId);
-        }
-
-        @Override
-        public net.minecraft.world.item.ItemStack getCarried() {
-            return CraftItemStack.asNMSCopy(carried);
-        }
-
-        @Override
-        public void setCarried(net.minecraft.world.item.ItemStack stack) {
-            carried = copyBukkitItem(CraftItemStack.asBukkitCopy(stack));
-            carriedDirty = true;
-        }
-
-        @Override
-        public void broadcastCarriedItem() {
-            // handled via our own sync
-        }
-
-        @Override
-        public void broadcastChanges() {
-            // handled via our own sync
-        }
-
-        @Override
-        public void broadcastFullState() {
-            // handled via our own sync
-        }
-
-        @Override
-        public InventoryView getBukkitView() {
-            return new FakeInventoryView(player, bukkitInventory);
-        }
-
-        @Override
-        public net.minecraft.world.item.ItemStack quickMoveStack(net.minecraft.world.entity.player.Player player, int i) {
-            return net.minecraft.world.item.ItemStack.EMPTY;
-        }
-
-        @Override
-        public boolean stillValid(net.minecraft.world.entity.player.Player player) {
-            return true;
-        }
-    }
 
 }

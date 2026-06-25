@@ -25,7 +25,10 @@ import java.util.function.Function;
  * in this inventory.
  */
 public sealed class ReferencingInventory extends xyz.xenondevs.invui.inventory.Inventory {
-    
+
+    /** Empty top inventory for the stand-in click-event view; never mutated (size 0). */
+    private static final Inventory EMPTY_VIEW_TOP = new VirtualInventory(0).asBukkitInventory();
+
     protected final Inventory inventory;
     protected final Function<Inventory, @Nullable ItemStack[]> itemsGetter;
     protected final BiFunction<Inventory, Integer, @Nullable ItemStack> itemGetter;
@@ -136,9 +139,11 @@ public sealed class ReferencingInventory extends xyz.xenondevs.invui.inventory.I
         var player = click.player();
         InventoryClickEvent bukkitEvent;
         if (this instanceof PlayerStorageContents && inventory == player.getInventory()) {
-            // for the player's own inventory, we use the bottom inventory of the view, regardless where the inventory is embedded,
-            // as many plugins will assume the player inventory to be at the bottom
-            var openView = player.getOpenInventory();
+            // for the player's own inventory, we report it at the bottom of a view with an empty
+            // top inventory, regardless where the inventory is embedded, as many plugins assume the
+            // player inventory to be at the bottom. A packet-based InvUI window has no real
+            // server-side container, so player.getOpenInventory() can no longer supply this view.
+            var openView = new FakeInventoryView(player, EMPTY_VIEW_TOP);
             int rawSlot = openView.getTopInventory().getSize() + slot;
             bukkitEvent = new InventoryClickEvent(
                 openView,
