@@ -922,6 +922,26 @@ public final class ItemBuilder implements ItemProvider {
     }
     
     /**
+     * Sets all custom model data entries.
+     *
+     * @param floats  The `floats` section
+     * @param flags   The `flags` section
+     * @param strings The `strings` section
+     * @param colors  The `colors` section
+     * @return The builder instance
+     */
+    public ItemBuilder setCustomModelData(float[] floats, boolean[] flags, String[] strings, java.awt.Color[] colors) {
+        return setCustomModelData(
+            floats,
+            flags,
+            strings,
+            Arrays.stream(colors)
+                .map(color -> Color.fromARGB(color.getRGB()))
+                .toArray(Color[]::new)
+        );
+    }
+    
+    /**
      * Sets all custom model data entries in the `floats` section.
      *
      * @param floats The `floats` section
@@ -973,6 +993,20 @@ public final class ItemBuilder implements ItemProvider {
             .map(Color::asARGB)
             .collect(Collectors.toCollection(IntArrayList::new));
         return this;
+    }
+    
+    /**
+     * Sets all custom model data entries in the `colors` section.
+     *
+     * @param colors The `colors` section
+     * @return The builder instance
+     */
+    public ItemBuilder setCustomModelData(java.awt.Color[] colors) {
+        return setCustomModelData(
+            Arrays.stream(colors)
+                .map(color -> Color.fromARGB(color.getRGB()))
+                .toArray(Color[]::new)
+        );
     }
     
     /**
