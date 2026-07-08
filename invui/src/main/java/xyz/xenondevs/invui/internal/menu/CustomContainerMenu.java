@@ -72,12 +72,6 @@ public abstract class CustomContainerMenu {
     protected final int containerId;
     protected final Player player;
     /**
-     * Whether this menu is currently the player's active container, i.e. {@link #open} has run
-     * and {@link #handleClosed} has not. Replaces the previous NMS {@code serverPlayer.containerMenu}
-     * identity check now that no server-side menu is pinned.
-     */
-    private boolean active;
-    /**
      * Stand-in Bukkit {@link InventoryView} for this menu, used only when firing Bukkit inventory
      * events. Its top inventory is empty, so a raw slot maps directly onto the player inventory.
      */
@@ -92,7 +86,15 @@ public abstract class CustomContainerMenu {
      * caller's sync thread never pays that cost.
      */
     private final org.bukkit.inventory.@Nullable ItemStack[] bukkitItems;
-    /** Cursor contents while this menu is active. */
+    /**
+     * Packet-layer snapshot of the cursor. The real Bukkit cursor
+     * ({@link Player#getItemOnCursor()}) is the single authoritative store —
+     * interaction handlers ({@code AbstractGui}, drag distribution) read and
+     * mutate it, some through the live CraftBukkit mirror without calling
+     * {@code setItemOnCursor}. This snapshot only exists so the sender worker
+     * can build cursor packets off-thread; it is refreshed from the real
+     * cursor after every interaction dispatch.
+     */
     private org.bukkit.inventory.@Nullable ItemStack carried;
     /**
      * Last value sent to the client for each slot. Combined with
@@ -200,18 +202,14 @@ public abstract class CustomContainerMenu {
 
     public void setCursor(org.bukkit.inventory.@Nullable ItemStack item) {
         carried = copyBukkitItem(item);
-        // While this menu is active the cursor is tracked internally and synced via packets;
-        // otherwise it belongs to the real (vanilla) player inventory.
-        if (!active) {
-            player.setItemOnCursor(copyBukkitItem(carried));
-        }
+        // Write through to the authoritative store. While this menu is active, the
+        // resulting vanilla cursor packet is discarded by our outgoing filter.
+        player.setItemOnCursor(copyBukkitItem(carried));
         carriedDirty = true;
     }
 
     public org.bukkit.inventory.@Nullable ItemStack getCursor() {
-        if (!active) {
-            carried = copyBukkitItem(player.getItemOnCursor());
-        }
+        carried = copyBukkitItem(player.getItemOnCursor());
         return copyBukkitItem(carried);
     }
 
@@ -474,8 +472,7 @@ public abstract class CustomContainerMenu {
     //<editor-fold desc="lifecycle">
 
     /**
-     * Registers the PacketEvents listeners, marks this menu as the player's active
-     * container, and sends the open-window sequence.
+     * Registers the PacketEvents listeners and sends the open-window sequence.
      */
     public void open(Component title) {
         open(title, List.of());
@@ -504,7 +501,6 @@ public abstract class CustomContainerMenu {
         pl.discard(player, PacketType.Play.Server.SET_SLOT);
         pl.discard(player, PacketType.Play.Server.SET_CURSOR_ITEM);
 
-        active = true;
         sendOpenPacket(title, extraInitPackets);
     }
 
@@ -532,13 +528,9 @@ public abstract class CustomContainerMenu {
         pl.stopDiscard(player, PacketType.Play.Server.SET_SLOT);
         pl.stopDiscard(player, PacketType.Play.Server.SET_CURSOR_ITEM);
 
-        // Mark the menu inactive and hand the cursor back to the real player inventory.
-        // We overwrote the lower-inventory visuals with bukkitItems[] while the menu was
-        // open, so ask vanilla to resend the player inventory below.
-        if (active) {
-            active = false;
-            player.setItemOnCursor(copyBukkitItem(carried));
-        }
+        // The real player cursor is authoritative at all times, so there is no cursor
+        // hand-back. We overwrote the lower-inventory visuals with bukkitItems[] while
+        // the menu was open, so ask vanilla to resend the player inventory below.
         if (cause != InventoryCloseEvent.Reason.OPEN_NEW) {
             player.updateInventory();
         }
@@ -621,7 +613,7 @@ public abstract class CustomContainerMenu {
             // matching upstream. We bypass Bukkit's event machinery because
             // the client's CLOSE_WINDOW packet was cancelled at the packet
             // layer, so vanilla never sees it. handleClose() routes through
-            // handleClosed(), which clears the active flag.
+            // handleClosed(), which tears down the packet listeners.
             getWindowEvents().handleClose(InventoryCloseEvent.Reason.PLAYER);
         } else {
             sendOpenPacket(title);
@@ -768,6 +760,11 @@ public abstract class CustomContainerMenu {
             run.run();
         } catch (Throwable t) {
             InvUI.getInstance().handleException("An exception occurred while handling a window interaction", t);
+        } finally {
+            // Interaction handlers operate on the real Bukkit cursor, often through its
+            // live CraftBukkit mirror; refresh the packet-layer snapshot so the next
+            // sync sends the true cursor instead of a stale one.
+            carried = copyBukkitItem(player.getItemOnCursor());
         }
     }
 
