@@ -3,7 +3,9 @@
 
 package xyz.xenondevs.invui.dsl
 
+import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.ItemType
 import xyz.xenondevs.commons.provider.Provider
 import xyz.xenondevs.invui.ExperimentalReactiveApi
 import xyz.xenondevs.invui.gui.Gui
@@ -16,6 +18,7 @@ import xyz.xenondevs.invui.gui.addIngredient
 import xyz.xenondevs.invui.inventory.Inventory
 import xyz.xenondevs.invui.item.Item
 import xyz.xenondevs.invui.item.ItemProvider
+import xyz.xenondevs.invui.item.ItemWrapper
 import java.util.function.Supplier
 import kotlin.contracts.InvocationKind
 import kotlin.contracts.contract
@@ -116,6 +119,54 @@ data class InventoryWithBackgroundProvider(
 )
 
 /**
+ * Pairs this [Inventory] with a static [Material] background for use as an ingredient.
+ *
+ * ```
+ * 'i' by (myInventory with Material.GRAY_STAINED_GLASS_PANE)
+ * ```
+ */
+@ExperimentalDslApi
+infix fun Inventory.with(background: Material): InventoryWithBackground =
+    InventoryWithBackground(this, ItemWrapper(ItemStack.of(background)))
+
+/**
+ * Pairs this [Inventory] with a reactive [Provider]-based [Material] background for use as
+ * an ingredient.
+ *
+ * ```
+ * 'i' by (myInventory with myMaterialProvider)
+ * ```
+ */
+@JvmName("withMaterialProvider")
+@ExperimentalDslApi
+infix fun Inventory.with(background: Provider<Material>): InventoryWithBackgroundProvider =
+    InventoryWithBackgroundProvider(this, background.map { ItemWrapper(ItemStack.of(it)) })
+
+/**
+ * Pairs this [Inventory] with a static [ItemType] background for use as an ingredient.
+ *
+ * ```
+ * 'i' by (myInventory with ItemType.GRAY_STAINED_GLASS_PANE)
+ * ```
+ */
+@ExperimentalDslApi
+infix fun Inventory.with(background: ItemType): InventoryWithBackground =
+    InventoryWithBackground(this, ItemWrapper(background.createItemStack()))
+
+/**
+ * Pairs this [Inventory] with a reactive [Provider]-based [ItemType] background for use as
+ * an ingredient.
+ *
+ * ```
+ * 'i' by (myInventory with myItemTypeProvider)
+ * ```
+ */
+@JvmName("withItemTypeProvider")
+@ExperimentalDslApi
+infix fun Inventory.with(background: Provider<ItemType>): InventoryWithBackgroundProvider =
+    InventoryWithBackgroundProvider(this, background.map { ItemWrapper(it.createItemStack()) })
+
+/**
  * Pairs this [Inventory] with a static [ItemProvider] background for use as an ingredient.
  *
  * ```
@@ -134,6 +185,7 @@ infix fun Inventory.with(background: ItemProvider): InventoryWithBackground =
  * 'i' by (myInventory with myItemProviderProvider)
  * ```
  */
+@JvmName("withItemProviderProvider")
 @ExperimentalDslApi
 infix fun Inventory.with(background: Provider<ItemProvider>): InventoryWithBackgroundProvider =
     InventoryWithBackgroundProvider(this, background)
@@ -220,6 +272,7 @@ sealed interface IngredientsDsl {
      * }
      * ```
      */
+    @JvmName("byItemProviderProvider")
     infix fun Char.by(itemProvider: Provider<ItemProvider>)
     
     /**
@@ -230,6 +283,46 @@ sealed interface IngredientsDsl {
      * ```
      */
     infix fun Char.by(itemStack: ItemStack)
+    
+    /**
+     * Maps this character to a [Material], creating a non-interactive display item.
+     *
+     * ```
+     * '#' by Material.GRAY_STAINED_GLASS_PANE
+     * ```
+     */
+    infix fun Char.by(material: Material)
+    
+    /**
+     * Maps this character to a reactive [Provider]-based [Material], creating a non-interactive
+     * display item that updates automatically when the provider's value changes.
+     *
+     * ```
+     * '#' by provider(Material.GRAY_STAINED_GLASS_PANE)
+     * ```
+     */
+    @JvmName("byMaterialProvider")
+    infix fun Char.by(material: Provider<Material>)
+    
+    /**
+     * Maps this character to an [ItemType], creating a non-interactive display item.
+     *
+     * ```
+     * '#' by ItemType.GRAY_STAINED_GLASS_PANE
+     * ```
+     */
+    infix fun Char.by(itemType: ItemType)
+    
+    /**
+     * Maps this character to a reactive [Provider]-based [ItemType], creating a non-interactive
+     * display item that updates automatically when the provider's value changes.
+     *
+     * ```
+     * '#' by provider(ItemType.GRAY_STAINED_GLASS_PANE)
+     * ```
+     */
+    @JvmName("byItemTypeProvider")
+    infix fun Char.by(itemType: Provider<ItemType>)
     
     /**
      * Maps this character to a [SlotElement] directly.
@@ -432,6 +525,24 @@ internal open class IngredientsDslImpl(
     
     override fun Char.by(itemStack: ItemStack) {
         ingredients.addIngredient(this, itemStack)
+    }
+    
+    override fun Char.by(material: Material) {
+        ingredients.addIngredient(this, ItemStack.of(material))
+    }
+    
+    @JvmName("byMaterialProvider")
+    override fun Char.by(material: Provider<Material>) {
+        ingredients.addIngredient(this, material.map { ItemWrapper(ItemStack.of(it)) })
+    }
+    
+    override fun Char.by(itemType: ItemType) {
+        ingredients.addIngredient(this, itemType.createItemStack())
+    }
+    
+    @JvmName("byItemTypeProvider")
+    override fun Char.by(itemType: Provider<ItemType>) {
+        ingredients.addIngredient(this, itemType.map { ItemWrapper(it.createItemStack()) })
     }
     
     override fun Char.by(element: SlotElement) {

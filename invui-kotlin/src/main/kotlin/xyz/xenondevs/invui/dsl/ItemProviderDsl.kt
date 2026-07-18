@@ -43,7 +43,7 @@ inline fun itemProvider(itemProvider: ItemProviderDsl.() -> Unit): Provider<Item
 
 /**
  * Creates a reactive [Provider]-based [ItemProvider] using the DSL, starting from a reactive
- * [base] [ItemStack].
+ * [base][base] [ItemStack][ItemStack].
  *
  * ```
  * val baseStack: Provider<ItemStack> = ...
@@ -55,6 +55,7 @@ inline fun itemProvider(itemProvider: ItemProviderDsl.() -> Unit): Provider<Item
  *
  * @see ItemProviderDsl
  */
+@JvmName("itemProviderByItemStackProvider")
 @ExperimentalDslApi
 inline fun itemProvider(base: Provider<ItemStack>, itemProvider: ItemProviderDsl.() -> Unit): Provider<ItemProvider> {
     contract { callsInPlace(itemProvider, InvocationKind.EXACTLY_ONCE) }
@@ -74,6 +75,7 @@ inline fun itemProvider(base: Provider<ItemStack>, itemProvider: ItemProviderDsl
  *
  * @see ItemProviderDsl
  */
+@JvmName("itemProviderByItemStack")
 @ExperimentalDslApi
 inline fun itemProvider(base: ItemStack, itemProvider: ItemProviderDsl.() -> Unit): Provider<ItemProvider> {
     contract { callsInPlace(itemProvider, InvocationKind.EXACTLY_ONCE) }
@@ -93,10 +95,31 @@ inline fun itemProvider(base: ItemStack, itemProvider: ItemProviderDsl.() -> Uni
  *
  * @see ItemProviderDsl
  */
+@JvmName("itemProviderByItemType")
 @ExperimentalDslApi
 inline fun itemProvider(type: ItemType, itemProvider: ItemProviderDsl.() -> Unit): Provider<ItemProvider> {
     contract { callsInPlace(itemProvider, InvocationKind.EXACTLY_ONCE) }
     return itemProvider(provider(type.createItemStack()), itemProvider)
+}
+
+/**
+ * Creates a reactive [Provider]-based [ItemProvider] using the DSL, starting from a reactive [type].
+ *
+ * ```
+ * val baseType: Provider<ItemType> = ...
+ * val myProvider = itemProvider(baseType) {
+ *     name by "<green>Enhanced Item"
+ *     amount by 5
+ * }
+ * ```
+ *
+ * @see ItemProviderDsl
+ */
+@JvmName("itemProviderByItemTypeProvider")
+@ExperimentalDslApi
+inline fun itemProvider(type: Provider<ItemType>, itemProvider: ItemProviderDsl.() -> Unit): Provider<ItemProvider> {
+    contract { callsInPlace(itemProvider, InvocationKind.EXACTLY_ONCE) }
+    return itemProvider(type.map { it.createItemStack() }, itemProvider)
 }
 
 /**

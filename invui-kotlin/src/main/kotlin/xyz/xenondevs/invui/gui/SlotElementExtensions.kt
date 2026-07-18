@@ -1,17 +1,47 @@
 package xyz.xenondevs.invui.gui
 
+import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.ItemType
 import xyz.xenondevs.commons.provider.Provider
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.ExperimentalReactiveApi
 import xyz.xenondevs.invui.PropertyAdapter
 import xyz.xenondevs.invui.inventory.Inventory
 import xyz.xenondevs.invui.item.ItemProvider
+import xyz.xenondevs.invui.item.ItemWrapper
 
 /**
  * Creates a new [SlotElement.InventoryLink] that links to [slot] in [inventory],
  * uses [background] if no item is present, and transforms all item stacks using [visualizer].
  */
+@JvmName("InventoryLinkMaterialProvider")
+@ExperimentalReactiveApi
+fun InventoryLink(
+    inventory: Inventory,
+    slot: Int,
+    background: Provider<Material>,
+    visualizer: (ItemStack?) -> ItemProvider? = { null }
+) = SlotElement.InventoryLink(inventory, slot, PropertyAdapter(background.map { ItemWrapper(ItemStack.of(it)) }), visualizer)
+
+/**
+ * Creates a new [SlotElement.InventoryLink] that links to [slot] in [inventory],
+ * uses [background] if no item is present, and transforms all item stacks using [visualizer].
+ */
+@JvmName("InventoryLinkItemTypeProvider")
+@ExperimentalReactiveApi
+fun InventoryLink(
+    inventory: Inventory,
+    slot: Int,
+    background: Provider<ItemType>,
+    visualizer: (ItemStack?) -> ItemProvider? = { null }
+) = SlotElement.InventoryLink(inventory, slot, PropertyAdapter(background.map { ItemWrapper(it.createItemStack()) }), visualizer)
+
+/**
+ * Creates a new [SlotElement.InventoryLink] that links to [slot] in [inventory],
+ * uses [background] if no item is present, and transforms all item stacks using [visualizer].
+ */
+@JvmName("InventoryLinkItemProviderProvider")
 @ExperimentalReactiveApi
 fun InventoryLink(
     inventory: Inventory,
