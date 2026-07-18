@@ -455,7 +455,7 @@ public abstract class CustomContainerMenu {
                 handlePong(p);
                 yield UpdateType.NONE;
             }
-            default -> throw new UnsupportedOperationException("Unknown packet type: " + packet.getClass().getName());
+            default -> UpdateType.NONE;
         };
     }
     
