@@ -254,7 +254,7 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
     }
     
     public void handleTick() {
-        var updateType = menu.processIncoming();
+        var updateType = menu.processIncoming().or(menu.pollCursor());
         updateAndFlush(updateType, -1);
         windowTick++;
     }
@@ -646,7 +646,14 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         unregisterAsViewer();
         menu.handleClosed(cause);
         isOpen = false;
-        
+
+        // The packet-based menu has no server-side container, so Bukkit's close event has
+        // to be fired explicitly for other plugins. The window was already removed from the
+        // WindowManager above, whose close listener therefore ignores this event.
+        if (InvUI.getInstance().isFireBukkitInventoryEvents()) {
+            Bukkit.getPluginManager().callEvent(new InventoryCloseEvent(menu.getBukkitView(), cause));
+        }
+
         ItemStack cursor = menu.getCursor();
         menu.setCursor(null);
         if (cause == Reason.PLAYER && FuncUtils.getSafely(fallbackWindow, DEFAULT_FALLBACK_WINDOW) instanceof AbstractWindow<?> fallback) {

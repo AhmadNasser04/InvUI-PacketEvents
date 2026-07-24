@@ -1,18 +1,18 @@
 package xyz.xenondevs.invui.internal.menu;
 
-import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.resources.ResourceLocation;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientCraftRecipeRequest;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCraftRecipeResponse;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.internal.network.PacketListener;
+import xyz.xenondevs.invui.internal.util.RecipeResolver;
 
 import java.util.function.Consumer;
 
@@ -39,11 +39,6 @@ public abstract class CustomRecipeBookPoweredMenu extends CustomContainerMenu {
     }
 
     @Override
-    public void handleClosed() {
-        handleClosed(InventoryCloseEvent.Reason.UNKNOWN);
-    }
-
-    @Override
     public void handleClosed(InventoryCloseEvent.Reason cause) {
         PacketListener.getInstance().removeRedirect(player, PacketType.Play.Client.CRAFT_RECIPE_REQUEST);
         super.handleClosed(cause);
@@ -55,9 +50,10 @@ public abstract class CustomRecipeBookPoweredMenu extends CustomContainerMenu {
             if (request.getWindowId() != containerId)
                 return UpdateType.NONE;
 
-            var key = request.getRecipeKey();
-            if (key != null && recipeSelectHandler != null) {
-                recipeSelectHandler.accept(Key.key(key.getNamespace(), key.getKey()));
+            if (recipeSelectHandler != null) {
+                Key key = resolveRecipeKey(request);
+                if (key != null)
+                    recipeSelectHandler.accept(key);
             }
             return UpdateType.NONE;
         }
@@ -65,22 +61,40 @@ public abstract class CustomRecipeBookPoweredMenu extends CustomContainerMenu {
     }
 
     /**
-     * Displays a ghost recipe of the given id in the menu.
+     * Resolves the recipe the client selected: pre-1.21.2 clicks carry the key directly;
+     * 1.21.2+ clicks carry a display id that is translated back through the display data
+     * the server previously sent (see {@link RecipeResolver}).
+     */
+    private @Nullable Key resolveRecipeKey(WrapperPlayClientCraftRecipeRequest request) {
+        var resourceLocation = request.getRecipeKey();
+        if (resourceLocation != null)
+            return Key.key(resourceLocation.getNamespace(), resourceLocation.getKey());
+
+        var displayId = request.getRecipeId();
+        if (displayId == null)
+            return null;
+        var cached = PacketListener.getInstance().getCachedRecipe(player, displayId.getId());
+        return cached != null ? RecipeResolver.resolveKey(cached) : null;
+    }
+
+    /**
+     * Displays a ghost recipe of the given id in the menu. Recipe types without a
+     * menu-displayable form (custom {@code Recipe} implementations) are ignored.
      *
      * @param id The recipe id
      */
     public void sendGhostRecipe(Key id) {
-        ServerVersion version = PacketEvents.getAPI().getServerManager().getVersion();
-        if (version.isNewerThanOrEquals(ServerVersion.V_1_21_2)) {
-            // PacketEvents needs a RecipeDisplay here, which InvUI does not model yet.
+        var recipe = Bukkit.getRecipe(new NamespacedKey(id.namespace(), id.value()));
+        if (recipe == null)
             return;
-        }
+        var display = RecipeResolver.toDisplay(recipe);
+        if (display == null)
+            return;
 
-        var packet = new WrapperPlayServerCraftRecipeResponse(
-            containerId,
-            new ResourceLocation(id.namespace(), id.value())
+        PacketListener.getInstance().injectOutgoing(
+            player,
+            new WrapperPlayServerCraftRecipeResponse(containerId, display)
         );
-        PacketListener.getInstance().injectOutgoing(player, packet);
     }
 
     public void setRecipeClickHandler(Consumer<? super Key> recipeClickHandler) {

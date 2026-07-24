@@ -5,9 +5,16 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
+import com.github.retrooper.packetevents.protocol.recipe.RecipePropertySet;
+import com.github.retrooper.packetevents.protocol.recipe.SingleInputOptionDisplay;
+import com.github.retrooper.packetevents.resources.ResourceLocation;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBundle;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDeclareRecipes;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRecipeBookAdd;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRecipeBookRemove;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -15,15 +22,17 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.InvUI;
+import xyz.xenondevs.invui.internal.util.RecipeResolver;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
-import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -34,35 +43,68 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public class PacketListener implements Listener {
-    private static final ExecutorService SEND_POOL = Executors.newFixedThreadPool(
+
+    private static @Nullable PacketListener instance;
+
+    private final ExecutorService sendPool = Executors.newFixedThreadPool(
         Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
         new SendThreadFactory()
     );
-
-    private static final PacketListener INSTANCE = new PacketListener();
-
+    private final Dispatcher dispatcher = new Dispatcher();
     private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
 
+    /**
+     * The most recent recipe data (item property sets + stonecutter recipes) vanilla has sent
+     * to any client. Recipe content is global, so one snapshot serves all players. Used to
+     * merge real item properties into custom stonecutter declarations and to restore the
+     * client's recipe state after a custom stonecutter menu closes.
+     */
+    private volatile @Nullable VanillaRecipeData vanillaRecipeData;
+
+    /**
+     * Per-player recipe book contents as sent by vanilla, keyed by recipe display id.
+     * On 1.21.2+ the client only ever refers to recipes by these ids, so this cache is
+     * the only way to translate recipe-book clicks back to recipe keys.
+     */
+    private final Map<UUID, Map<Integer, RecipeResolver.CachedRecipe>> recipeBooks = new ConcurrentHashMap<>();
+
     private PacketListener() {
-        PacketEvents.getAPI().getEventManager().registerListener(new Dispatcher());
+        PacketEvents.getAPI().getEventManager().registerListener(dispatcher);
         Bukkit.getPluginManager().registerEvents(this, InvUI.getInstance().getPlugin());
-        Bukkit.getOnlinePlayers().forEach(player -> states.put(player.getUniqueId(), new PlayerState()));
-        InvUI.getInstance().addDisableHandler(() -> {
-            states.clear();
-            SEND_POOL.shutdown();
-            try {
-                SEND_POOL.awaitTermination(2, TimeUnit.SECONDS);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-        });
+        Bukkit.getOnlinePlayers().forEach(player -> states.put(player.getUniqueId(), new PlayerState(sendPool)));
+        InvUI.getInstance().addDisableHandler(this::shutdown);
     }
 
-    public static PacketListener getInstance() {
-        return INSTANCE;
+    public static synchronized PacketListener getInstance() {
+        PacketListener inst = instance;
+        if (inst == null) {
+            inst = new PacketListener();
+            instance = inst;
+        }
+        return inst;
+    }
+
+    private static synchronized void clearInstance() {
+        instance = null;
+    }
+
+    private void shutdown() {
+        // must be unregistered explicitly: when PacketEvents is owned by another plugin,
+        // it outlives InvUI's plugin and would otherwise keep dispatching into it
+        PacketEvents.getAPI().getEventManager().unregisterListener(dispatcher);
+        states.clear();
+        recipeBooks.clear();
+        sendPool.shutdown();
+        try {
+            sendPool.awaitTermination(2, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+        clearInstance();
     }
 
     public void discard(Player player, PacketTypeCommon type) {
@@ -71,6 +113,19 @@ public class PacketListener implements Listener {
 
     public void stopDiscard(Player player, PacketTypeCommon type) {
         getState(player.getUniqueId()).discards.remove(type);
+    }
+
+    /**
+     * Registers an outgoing filter for the given packet type. The filter runs on the netty
+     * thread; returning {@code true} cancels the packet. Unlike {@link #discard}, the filter
+     * may inspect (and re-emit parts of) the packet before deciding.
+     */
+    public void filterOutgoing(Player player, PacketTypeCommon type, Predicate<PacketSendEvent> filter) {
+        getState(player.getUniqueId()).filters.put(type, filter);
+    }
+
+    public void removeOutgoingFilter(Player player, PacketTypeCommon type) {
+        getState(player.getUniqueId()).filters.remove(type);
     }
 
     public void injectOutgoing(Player player, Supplier<? extends List<? extends PacketWrapper<?>>> wrapperSupplier) {
@@ -102,6 +157,28 @@ public class PacketListener implements Listener {
                 InvUI.getInstance().handleException("Failed to send packet asynchronously", t);
             }
         });
+    }
+
+    /**
+     * Runs {@code action} on the player's sender worker after every send queued so far has
+     * completed, establishing ordering between InvUI's async packet queue and follow-up work.
+     */
+    public void runAfterPendingSends(Player player, Runnable action) {
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) {
+            action.run();
+            return;
+        }
+        state.sender.execute(action);
+    }
+
+    public @Nullable VanillaRecipeData getVanillaRecipeData() {
+        return vanillaRecipeData;
+    }
+
+    public RecipeResolver.@Nullable CachedRecipe getCachedRecipe(Player player, int displayId) {
+        var book = recipeBooks.get(player.getUniqueId());
+        return book != null ? book.get(displayId) : null;
     }
 
     private static void sendBundle(Player player, List<PacketWrapper<?>> wrappers) {
@@ -159,13 +236,64 @@ public class PacketListener implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     private void handleJoin(PlayerJoinEvent event) {
-        states.put(event.getPlayer().getUniqueId(), new PlayerState());
+        states.put(event.getPlayer().getUniqueId(), new PlayerState(sendPool));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     private void handleQuit(PlayerQuitEvent event) {
         states.remove(event.getPlayer().getUniqueId());
+        recipeBooks.remove(event.getPlayer().getUniqueId());
     }
+
+    private void cacheDeclareRecipes(PacketSendEvent event) {
+        try {
+            var wrapper = new WrapperPlayServerDeclareRecipes(event);
+            vanillaRecipeData = new VanillaRecipeData(
+                Map.copyOf(wrapper.getItemSets()),
+                List.copyOf(wrapper.getStonecutterRecipes())
+            );
+            // a fresh recipe declaration implies the server's recipes may have been reloaded
+            RecipeResolver.invalidateIndex();
+        } catch (Throwable t) {
+            InvUI.getInstance().handleException("Failed to cache vanilla recipe data", t);
+        }
+    }
+
+    private void cacheRecipeBookAdd(PacketSendEvent event) {
+        try {
+            var wrapper = new WrapperPlayServerRecipeBookAdd(event);
+            var book = recipeBooks.computeIfAbsent(event.getUser().getUUID(), uuid -> new ConcurrentHashMap<>());
+            if (wrapper.isReplace())
+                book.clear();
+            for (var entry : wrapper.getEntries()) {
+                var contents = entry.getContents();
+                book.put(contents.getId().getId(), RecipeResolver.fromDisplayEntry(contents));
+            }
+        } catch (Throwable t) {
+            InvUI.getInstance().handleException("Failed to cache recipe book entries", t);
+        }
+    }
+
+    private void cacheRecipeBookRemove(PacketSendEvent event) {
+        try {
+            var wrapper = new WrapperPlayServerRecipeBookRemove(event);
+            var book = recipeBooks.get(event.getUser().getUUID());
+            if (book != null) {
+                wrapper.getRecipeIds().forEach(id -> book.remove(id.getId()));
+            }
+        } catch (Throwable t) {
+            InvUI.getInstance().handleException("Failed to remove cached recipe book entries", t);
+        }
+    }
+
+    /**
+     * The recipe content vanilla last declared to clients: the item property sets
+     * (furnace inputs, smithing slots, ...) and the real stonecutter recipes.
+     */
+    public record VanillaRecipeData(
+        Map<ResourceLocation, RecipePropertySet> itemSets,
+        List<SingleInputOptionDisplay> stonecutterRecipes
+    ) {}
 
     private record Entry<T extends PacketWrapper<?>>(
         Function<PacketReceiveEvent, T> factory,
@@ -178,11 +306,16 @@ public class PacketListener implements Listener {
 
     private static final class PlayerState {
         final Set<PacketTypeCommon> discards = Collections.newSetFromMap(new ConcurrentHashMap<>());
+        final Map<PacketTypeCommon, Predicate<PacketSendEvent>> filters = new ConcurrentHashMap<>();
         @SuppressWarnings("rawtypes")
         final Map<PacketTypeCommon, Entry> redirects = new ConcurrentHashMap<>();
         @SuppressWarnings("rawtypes")
         final Map<PacketTypeCommon, Entry> listeners = new ConcurrentHashMap<>();
-        final SerialExecutor sender = new SerialExecutor(SEND_POOL);
+        final SerialExecutor sender;
+
+        PlayerState(Executor sendPool) {
+            this.sender = new SerialExecutor(sendPool);
+        }
     }
 
     private static final class SerialExecutor {
@@ -247,12 +380,29 @@ public class PacketListener implements Listener {
 
         @Override
         public void onPacketSend(PacketSendEvent event) {
+            PacketTypeCommon type = event.getPacketType();
+
+            // keep recipe caches fresh even while the packets themselves are being discarded,
+            // so post-close restores always reflect the server's latest recipe state
+            if (type == PacketType.Play.Server.DECLARE_RECIPES) {
+                cacheDeclareRecipes(event);
+            } else if (type == PacketType.Play.Server.RECIPE_BOOK_ADD) {
+                cacheRecipeBookAdd(event);
+            } else if (type == PacketType.Play.Server.RECIPE_BOOK_REMOVE) {
+                cacheRecipeBookRemove(event);
+            }
+
             if (!(event.getPlayer() instanceof Player player))
                 return;
             PlayerState state = states.get(player.getUniqueId());
             if (state == null)
                 return;
-            if (state.discards.contains(event.getPacketType())) {
+            if (state.discards.contains(type)) {
+                event.setCancelled(true);
+                return;
+            }
+            Predicate<PacketSendEvent> filter = state.filters.get(type);
+            if (filter != null && filter.test(event)) {
                 event.setCancelled(true);
             }
         }

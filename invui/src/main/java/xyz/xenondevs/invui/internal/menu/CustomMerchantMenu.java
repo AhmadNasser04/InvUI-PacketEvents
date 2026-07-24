@@ -131,33 +131,29 @@ public class CustomMerchantMenu extends CustomContainerMenu {
             ? ItemUtils.getPlaceholder()
             : ItemUtils.takeOrPlaceholder(item.getItemProvider(player).get(player.locale()));
         ItemStack peItem = SpigotConversionUtil.fromBukkitItemStack(bukkit).copy();
-        int tag = MathUtils.RANDOM.nextInt();
 
-        // Modern: custom_data component
+        // random tag prevents the client from matching player items against trade costs
         NBTCompound customData = peItem.getComponent(ComponentTypes.CUSTOM_DATA)
             .orElseGet(NBTCompound::new);
-        customData.setTag("invui_merchant", new NBTInt(tag));
+        customData.setTag("invui_merchant", new NBTInt(MathUtils.RANDOM.nextInt()));
         peItem.setComponent(ComponentTypes.CUSTOM_DATA, customData);
-
-        // Legacy: top-level NBT tag (for pre-1.20.5 wire format)
-        NBTCompound legacy = peItem.getNBT();
-        if (legacy == null) legacy = new NBTCompound();
-        legacy.setTag("invui_merchant", new NBTInt(tag));
-        peItem.setNBT(legacy);
 
         return peItem;
     }
 
+    /**
+     * Mirrors vanilla {@code VillagerData.getMaxXpPerLevel(level) * progress}: the threshold
+     * to reach the <em>next</em> level, or 0 at max level (no further progress possible).
+     */
     private static int merchantXp(int level, double progress) {
         if (progress < 0 || level <= 0)
             return 0;
 
         return switch (level) {
-            case 1 -> (int) (0 * progress);
-            case 2 -> (int) (10 * progress);
-            case 3 -> (int) (70 * progress);
-            case 4 -> (int) (150 * progress);
-            case 5 -> (int) (250 * progress);
+            case 1 -> (int) (10 * progress);
+            case 2 -> (int) (70 * progress);
+            case 3 -> (int) (150 * progress);
+            case 4 -> (int) (250 * progress);
             default -> 0;
         };
     }

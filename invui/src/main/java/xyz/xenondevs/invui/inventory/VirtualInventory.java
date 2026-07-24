@@ -238,10 +238,11 @@ public final class VirtualInventory extends Inventory {
             }
 
             case 5 -> throw new UnsupportedOperationException(
-                "VirtualInventory v5 data was written only by the legacy NMS-based InvUI 2.0 and "
-                    + "requires Mojang's data fixers to migrate. This PacketEvents build has no access "
-                    + "to them. Re-serialize the data with a legacy NMS InvUI version (which writes it "
-                    + "as v6) before loading it here.");
+                "VirtualInventory v5 data was written by the NMS-based upstream InvUI 2.x and "
+                    + "requires Mojang's data fixers to read. This PacketEvents build has no access "
+                    + "to them. To migrate, run a one-time conversion on upstream InvUI: deserialize "
+                    + "the inventory there and re-save its items with Bukkit's "
+                    + "ItemStack#serializeAsBytes (the format this build reads as v6).");
 
             default -> throw new UnsupportedOperationException("Unsupported VirtualInventory version: " + id);
         }

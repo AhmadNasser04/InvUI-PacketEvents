@@ -1,8 +1,11 @@
 package xyz.xenondevs.invui.internal.util;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.block.EntityBlockStorage;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.InvUI;
@@ -69,8 +72,7 @@ public final class ItemUtils2 {
     
     /**
      * Adds the given target stack to the given bundle stack, updating both
-     * stacks appropriately. The vanilla weight formula ({@code sum(amount *
-     * 64 / maxStackSize) <= 64}) is applied.
+     * stacks appropriately, applying the vanilla bundle weight rules.
      *
      * @param bundle the bundle item stack
      * @param target the target item stack
@@ -155,28 +157,63 @@ public final class ItemUtils2 {
      * {@code bundle} according to the vanilla bundle weight formula.
      */
     public static int getMaxAmountToAddToBundle(ItemStack bundle, ItemStack target) {
-        if (ItemUtils.isEmpty(target))
+        if (ItemUtils.isEmpty(target) || !canFitInsideContainerItems(target))
             return 0;
 
         var contents = bundle.getData(DataComponentTypes.BUNDLE_CONTENTS);
         if (contents == null)
             return 0;
 
-        // Vanilla weight: each item's weight = 64 / maxStackSize. Bundle capacity = 64.
         int usedWeight = 0;
         for (var stack : contents.contents()) {
-            int perItem = 64 / Math.max(1, stack.getMaxStackSize());
-            usedWeight += stack.getAmount() * perItem;
+            usedWeight += stack.getAmount() * unitWeight64ths(stack);
         }
         int remainingWeight = 64 - usedWeight;
         if (remainingWeight <= 0)
             return 0;
 
-        int perTargetWeight = 64 / Math.max(1, target.getMaxStackSize());
-        if (perTargetWeight <= 0)
-            return target.getAmount();
-
+        int perTargetWeight = unitWeight64ths(target);
         return Math.min(target.getAmount(), remainingWeight / perTargetWeight);
+    }
+
+    /**
+     * Weight of a single item of {@code stack} in 1/64ths of a bundle, following vanilla:
+     * nested bundles weigh 4/64 plus their contents, items carrying bees fill the whole
+     * bundle, anything else weighs 1/maxStackSize. Non-divisor max stack sizes (only
+     * reachable through a custom max_stack_size component) are rounded up so the bundle
+     * can never be overfilled.
+     */
+    private static int unitWeight64ths(ItemStack stack) {
+        var nested = stack.getData(DataComponentTypes.BUNDLE_CONTENTS);
+        if (nested != null) {
+            int weight = 4;
+            for (var content : nested.contents()) {
+                weight += content.getAmount() * unitWeight64ths(content);
+            }
+            return weight;
+        }
+        if (carriesBees(stack))
+            return 64;
+        int maxStackSize = Math.max(1, stack.getMaxStackSize());
+        return (64 + maxStackSize - 1) / maxStackSize;
+    }
+
+    private static boolean carriesBees(ItemStack stack) {
+        var type = stack.getType();
+        if (type != Material.BEEHIVE && type != Material.BEE_NEST)
+            return false;
+        return stack.getItemMeta() instanceof BlockStateMeta meta
+            && meta.hasBlockState()
+            && meta.getBlockState() instanceof EntityBlockStorage<?> storage
+            && storage.getEntityCount() > 0;
+    }
+
+    /**
+     * Mirror of vanilla {@code Item#canFitInsideContainerItems}, which Bukkit does not
+     * expose: only shulker boxes are excluded from bundles.
+     */
+    private static boolean canFitInsideContainerItems(ItemStack stack) {
+        return !stack.getType().getKey().getKey().endsWith("shulker_box");
     }
     
     /**

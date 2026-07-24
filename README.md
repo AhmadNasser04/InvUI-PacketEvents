@@ -26,8 +26,8 @@ across supported Minecraft versions without per-version compilation.
 
 **Runtime requirements**
 
-- Paper 1.21.0+ 
-- PacketEvents 2.12.0+ 
+- Paper 1.21.4+ 
+- PacketEvents 2.12.0+
 
 **Upstream compatibility baseline**
 

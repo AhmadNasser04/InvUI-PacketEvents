@@ -1,6 +1,7 @@
 package xyz.xenondevs.invui.internal.menu;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.item.ItemStack;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
@@ -111,6 +112,16 @@ public abstract class CustomContainerMenu {
     private boolean carriedDirty = true;
     private Function<? super ItemStack, ? extends ItemStack> cursorVisualizer = Function.identity();
 
+    /**
+     * Identity-keyed cache of the last Bukkit→PacketEvents conversion per slot, so full
+     * resends (window open, title animations, FULL resyncs) skip re-converting slots whose
+     * Bukkit stack instance is unchanged. Confined to the per-player sender worker: the
+     * {@code SerialExecutor} guarantees the tasks touching these arrays never run
+     * concurrently and establishes happens-before between them.
+     */
+    private final org.bukkit.inventory.@Nullable ItemStack[] peCacheSource;
+    private final @Nullable ItemStack[] peCacheValue;
+
     protected final int[] dataSlots;
     protected final int[] remoteDataSlots;
     private int stateId;
@@ -137,6 +148,8 @@ public abstract class CustomContainerMenu {
         int size = menuType.size() + LOWER_INVENTORY_SIZE;
         this.bukkitItems = new org.bukkit.inventory.ItemStack[size];
         this.lastSentItems = new org.bukkit.inventory.ItemStack[size];
+        this.peCacheSource = new org.bukkit.inventory.ItemStack[size];
+        this.peCacheValue = new ItemStack[size];
         this.dirtySlots = new BitSet(size);
         this.dirtySlots.set(0, size);
         loadPlayerInventoryIntoLowerSlots();
@@ -224,6 +237,19 @@ public abstract class CustomContainerMenu {
         return SpigotConversionUtil.fromBukkitItemStack(item);
     }
 
+    /** Converts through the per-slot identity cache; only call on the sender worker. */
+    private ItemStack fromBukkitCached(int slot, org.bukkit.inventory.@Nullable ItemStack item) {
+        if (item == null || item.getType().isAir())
+            return ItemStack.EMPTY;
+        var cached = peCacheValue[slot];
+        if (cached != null && peCacheSource[slot] == item)
+            return cached;
+        ItemStack pe = SpigotConversionUtil.fromBukkitItemStack(item);
+        peCacheSource[slot] = item;
+        peCacheValue[slot] = pe;
+        return pe;
+    }
+
     private static org.bukkit.inventory.@Nullable ItemStack copyBukkitItem(org.bukkit.inventory.@Nullable ItemStack item) {
         if (item == null || item.getType().isAir())
             return null;
@@ -291,7 +317,7 @@ public abstract class CustomContainerMenu {
             var packets = new ArrayList<PacketWrapper<?>>(finalDirtyCount + finalDataCount + 2);
             for (int i = 0; i < finalDirtyCount; i++) {
                 packets.add(new WrapperPlayServerSetSlot(
-                    cId, slotStateIds[i], slotIndices[i], fromBukkit(slotSnapshots[i])
+                    cId, slotStateIds[i], slotIndices[i], fromBukkitCached(slotIndices[i], slotSnapshots[i])
                 ));
             }
             if (finalSendCarried) {
@@ -378,7 +404,7 @@ public abstract class CustomContainerMenu {
                     packets.add(prefix);
                 for (int i = 0; i < finalSparseCount; i++) {
                     packets.add(new WrapperPlayServerSetSlot(
-                        cId, sparseStateIds[i], sparseSlots[i], fromBukkit(sparseBukkit[i])
+                        cId, sparseStateIds[i], sparseSlots[i], fromBukkitCached(sparseSlots[i], sparseBukkit[i])
                     ));
                 }
                 packets.add(new WrapperPlayServerSetCursorItem(visualizeCarried(carriedSnapshot)));
@@ -399,8 +425,8 @@ public abstract class CustomContainerMenu {
                 if (prefix != null)
                     packets.add(prefix);
                 var contents = new ArrayList<ItemStack>(bukkitSnapshot.length);
-                for (var b : bukkitSnapshot)
-                    contents.add(fromBukkit(b));
+                for (int i = 0; i < bukkitSnapshot.length; i++)
+                    contents.add(fromBukkitCached(i, bukkitSnapshot[i]));
                 ItemStack peCarried = visualizeCarried(carriedSnapshot);
                 packets.add(new WrapperPlayServerWindowItems(cId, windowItemsStateId, contents, peCarried));
                 packets.add(new WrapperPlayServerSetCursorItem(peCarried));
@@ -459,6 +485,57 @@ public abstract class CustomContainerMenu {
         return cursorVisualizer.apply(fromBukkit(item));
     }
 
+    /**
+     * Compares the real Bukkit cursor against the packet-layer snapshot; called once per
+     * tick so cursor changes made outside interaction handlers (e.g. another plugin calling
+     * {@code setItemOnCursor}) still propagate while the vanilla cursor packet is discarded.
+     */
+    public UpdateType pollCursor() {
+        var real = copyBukkitItem(player.getItemOnCursor());
+        if (Objects.equals(carried, real))
+            return UpdateType.NONE;
+        carried = real;
+        return UpdateType.DIRTY;
+    }
+
+    /**
+     * Outgoing filter for vanilla SET_SLOT packets while this menu is open. Runs on the
+     * netty thread. Container-0 slots 9..44 (main inventory + hotbar) are displayed by
+     * this menu and get suppressed; crafting, armor and off-hand slots only affect the
+     * HUD and pass through. Traffic for any other container id is stale and dropped.
+     */
+    private boolean filterVanillaSetSlot(PacketSendEvent event) {
+        var wrapper = new WrapperPlayServerSetSlot(event);
+        if (wrapper.getWindowId() != 0)
+            return true;
+        int slot = wrapper.getSlot();
+        return slot >= 9 && slot <= 44;
+    }
+
+    /**
+     * Outgoing filter for vanilla WINDOW_ITEMS packets while this menu is open. Runs on
+     * the netty thread. A container-0 full resend (e.g. {@code player.updateInventory()})
+     * would clobber this menu's lower-inventory display, so the packet is cancelled and
+     * only the HUD-relevant slots (armor 5..8, off-hand 45) are re-emitted individually,
+     * keeping the vanilla state id.
+     */
+    private boolean filterVanillaWindowItems(PacketSendEvent event) {
+        var wrapper = new WrapperPlayServerWindowItems(event);
+        if (wrapper.getWindowId() != 0)
+            return true;
+
+        var items = wrapper.getItems();
+        int stateId = wrapper.getStateId();
+        var playerManager = PacketEvents.getAPI().getPlayerManager();
+        for (int slot = 5; slot <= 8 && slot < items.size(); slot++) {
+            playerManager.sendPacketSilently(player, new WrapperPlayServerSetSlot(0, stateId, slot, items.get(slot)));
+        }
+        if (items.size() > 45) {
+            playerManager.sendPacketSilently(player, new WrapperPlayServerSetSlot(0, stateId, 45, items.get(45)));
+        }
+        return true;
+    }
+
     private void markRemoteSynced() {
         System.arraycopy(bukkitItems, 0, lastSentItems, 0, bukkitItems.length);
         dirtySlots.clear();
@@ -496,10 +573,14 @@ public abstract class CustomContainerMenu {
             WrapperPlayClientPong::new, incoming);
 
         pl.discard(player, PacketType.Play.Server.OPEN_WINDOW);
-        pl.discard(player, PacketType.Play.Server.WINDOW_ITEMS);
         pl.discard(player, PacketType.Play.Server.WINDOW_PROPERTY);
-        pl.discard(player, PacketType.Play.Server.SET_SLOT);
         pl.discard(player, PacketType.Play.Server.SET_CURSOR_ITEM);
+        // SET_SLOT and WINDOW_ITEMS are filtered rather than discarded outright: the server's
+        // containerMenu stays the vanilla inventory menu while this packet-based menu is open,
+        // so vanilla keeps broadcasting container-0 updates. Slots this menu displays (9..44)
+        // must be suppressed, but HUD-relevant slots (armor, off-hand) must still get through.
+        pl.filterOutgoing(player, PacketType.Play.Server.SET_SLOT, this::filterVanillaSetSlot);
+        pl.filterOutgoing(player, PacketType.Play.Server.WINDOW_ITEMS, this::filterVanillaWindowItems);
 
         sendOpenPacket(title, extraInitPackets);
     }
@@ -523,16 +604,25 @@ public abstract class CustomContainerMenu {
         pl.stopListening(player, PacketType.Play.Client.PONG);
 
         pl.stopDiscard(player, PacketType.Play.Server.OPEN_WINDOW);
-        pl.stopDiscard(player, PacketType.Play.Server.WINDOW_ITEMS);
         pl.stopDiscard(player, PacketType.Play.Server.WINDOW_PROPERTY);
-        pl.stopDiscard(player, PacketType.Play.Server.SET_SLOT);
         pl.stopDiscard(player, PacketType.Play.Server.SET_CURSOR_ITEM);
+        pl.removeOutgoingFilter(player, PacketType.Play.Server.SET_SLOT);
+        pl.removeOutgoingFilter(player, PacketType.Play.Server.WINDOW_ITEMS);
 
         // The real player cursor is authoritative at all times, so there is no cursor
         // hand-back. We overwrote the lower-inventory visuals with bukkitItems[] while
-        // the menu was open, so ask vanilla to resend the player inventory below.
+        // the menu was open, so ask vanilla to resend the player inventory below. The
+        // resync is ordered behind the sender queue so a still-pending InvUI send
+        // cannot overwrite the refreshed inventory.
         if (cause != InventoryCloseEvent.Reason.OPEN_NEW) {
-            player.updateInventory();
+            var plugin = InvUI.getInstance().getPlugin();
+            pl.runAfterPendingSends(player, () -> {
+                try {
+                    player.getScheduler().run(plugin, task -> player.updateInventory(), null);
+                } catch (Throwable ignored) {
+                    // plugin disabling or player retired — nothing left to resync
+                }
+            });
         }
     }
 
@@ -621,33 +711,69 @@ public abstract class CustomContainerMenu {
     }
 
     /**
-     * Handles a CLICK_WINDOW packet. The server is authoritative — we
-     * ignore the client-reported slot deltas (legacy or hashed), dispatch
-     * the interaction to the window, then dirty every slot so the next
-     * sync corrects any optimistic client prediction.
+     * Handles a CLICK_WINDOW packet. The server is authoritative — we never apply the
+     * client-reported slot contents, but their slot <em>indices</em> are exactly the slots
+     * the client optimistically changed, so only those (plus the cursor) need a corrective
+     * resend. Server-side changes made by the interaction handlers are picked up separately
+     * by the content diff in {@link #sendChangesToRemote}.
      */
     protected UpdateType handleClick(WrapperPlayClientClickWindow packet) {
         boolean stateIdMismatch = packet.getStateId().map(id -> id != stateId).orElse(false);
 
         carriedDirty = true;
 
+        boolean isDragEnd = false;
         if (packet.getWindowClickType() == WindowClickType.QUICK_CRAFT) {
             if (!handleDragClick(packet))
                 return stateIdMismatch ? UpdateType.FULL : UpdateType.DIRTY;
+            isDragEnd = true;
         } else {
             handleNormalClick(packet);
         }
 
-        // Dirty every slot, upper and lower. Shift-clicks, swaps, drags and
-        // double-click-collect can touch either half, and since we cancel the
-        // click at the packet layer the server state is unchanged from the
-        // client's perspective. We do NOT re-read the player inventory here —
-        // that would clobber custom items the lower gui placed in pass-through
-        // slots. bukkitItems[] is already authoritative; AbstractWindow keeps
-        // it current through its gui element observer chain.
-        dirtySlots.set(0, bukkitItems.length);
+        dirtyClientPredictedSlots(packet, isDragEnd);
 
         return stateIdMismatch ? UpdateType.FULL : UpdateType.DIRTY;
+    }
+
+    /**
+     * Dirties the slots the client predicted changes for while processing this click.
+     * The clicked slot is always included. If a click type that can touch many slots
+     * carries no per-slot predictions (e.g. rewritten by a protocol translator), every
+     * slot is dirtied as a conservative fallback.
+     */
+    private void dirtyClientPredictedSlots(WrapperPlayClientClickWindow packet, boolean isDragEnd) {
+        boolean anyPredicted = false;
+
+        var legacySlots = packet.getSlots();
+        if (legacySlots.isPresent()) {
+            for (int slot : legacySlots.get().keySet()) {
+                if (slot >= 0 && slot < bukkitItems.length) {
+                    dirtySlots.set(slot);
+                    anyPredicted = true;
+                }
+            }
+        }
+        for (int slot : packet.getHashedSlots().keySet()) {
+            if (slot >= 0 && slot < bukkitItems.length) {
+                dirtySlots.set(slot);
+                anyPredicted = true;
+            }
+        }
+
+        int clicked = packet.getSlot();
+        if (clicked >= 0 && clicked < bukkitItems.length)
+            dirtySlots.set(clicked);
+
+        if (!anyPredicted) {
+            var clickType = packet.getWindowClickType();
+            boolean multiSlot = isDragEnd
+                || clickType == WindowClickType.QUICK_MOVE
+                || clickType == WindowClickType.PICKUP_ALL
+                || clickType == WindowClickType.SWAP;
+            if (multiSlot)
+                dirtySlots.set(0, bukkitItems.length);
+        }
     }
 
     private void handleNormalClick(WrapperPlayClientClickWindow packet) {
@@ -671,8 +797,11 @@ public abstract class CustomContainerMenu {
                     yield ClickType.NUMBER_KEY;
                 }
                 if (button == 40) {
-                    // off-hand swap — force a player-inventory resync so the
-                    // client's optimistic off-hand update gets corrected.
+                    // off-hand swap — force a player-inventory resync so the client's
+                    // optimistic off-hand update gets corrected. The resulting vanilla
+                    // WINDOW_ITEMS is reduced to its HUD-relevant slots by
+                    // filterVanillaWindowItems; the menu slots are corrected by
+                    // dirtyClientPredictedSlots as usual.
                     player.updateInventory();
                     yield ClickType.SWAP_OFFHAND;
                 }

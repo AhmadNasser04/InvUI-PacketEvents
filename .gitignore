@@ -77,3 +77,5 @@ gradle-app.setting
 
 # AI Agents
 .claude/*
+# macOS
+.DS_Store

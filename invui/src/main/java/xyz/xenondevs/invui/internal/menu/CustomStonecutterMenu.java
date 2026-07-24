@@ -1,10 +1,9 @@
 package xyz.xenondevs.invui.internal.menu;
 
-import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.protocol.item.type.ItemType;
 import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
 import com.github.retrooper.packetevents.protocol.mapper.MappedEntitySet;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.recipe.SingleInputOptionDisplay;
 import com.github.retrooper.packetevents.protocol.recipe.display.slot.ItemStackSlotDisplay;
 import com.github.retrooper.packetevents.protocol.recipe.display.slot.SlotDisplay;
@@ -12,6 +11,8 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientCl
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDeclareRecipes;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetSlot;
 import io.github.retrooper.packetevents.util.SpigotConversionUtil;
+import net.kyori.adventure.text.Component;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.ItemStack;
 import org.jspecify.annotations.Nullable;
 import xyz.xenondevs.invui.internal.network.PacketListener;
@@ -26,11 +27,37 @@ import java.util.function.BiConsumer;
  */
 public class CustomStonecutterMenu extends CustomContainerMenu {
 
+    /** Lazily built "any item" input set shared by all custom stonecutter declarations. */
+    private static @Nullable MappedEntitySet<ItemType> allItemsInput;
+
     private @Nullable BiConsumer<? super Integer, ? super Integer> clickHandler;
 
     public CustomStonecutterMenu(org.bukkit.entity.Player player) {
         super(MenuType.STONECUTTER, player);
         dataSlots[0] = -1;
+    }
+
+    @Override
+    public void open(Component title) {
+        // vanilla recipe declarations (e.g. from a datapack reload) would replace the
+        // custom buttons client-side; the latest declaration stays cached by the packet
+        // listener and is restored in handleClosed
+        PacketListener.getInstance().discard(player, PacketType.Play.Server.DECLARE_RECIPES);
+        super.open(title);
+    }
+
+    @Override
+    public void handleClosed(InventoryCloseEvent.Reason cause) {
+        var pl = PacketListener.getInstance();
+        pl.stopDiscard(player, PacketType.Play.Server.DECLARE_RECIPES);
+        var vanilla = pl.getVanillaRecipeData();
+        if (vanilla != null) {
+            pl.injectOutgoing(player, new WrapperPlayServerDeclareRecipes(
+                vanilla.itemSets(),
+                vanilla.stonecutterRecipes()
+            ));
+        }
+        super.handleClosed(cause);
     }
 
     @Override
@@ -49,17 +76,10 @@ public class CustomStonecutterMenu extends CustomContainerMenu {
     }
 
     /**
-     * Sets the buttons (recipes) of the stonecutter menu. Requires 1.21.2+.
+     * Sets the buttons (recipes) of the stonecutter menu.
      */
     public void setButtons(List<? extends @Nullable ItemStack> buttons) {
-        ServerVersion version = PacketEvents.getAPI().getServerManager().getVersion();
-        if (version.isOlderThan(ServerVersion.V_1_21_2)) {
-            throw new UnsupportedOperationException(
-                "CustomStonecutterMenu.setButtons requires Minecraft 1.21.2+ — " +
-                "PacketEvents 2.12.0 does not model the legacy stonecutter recipe wire format.");
-        }
-
-        var input = allItemsInput();
+        var input = getAllItemsInput();
         var displays = new ArrayList<SingleInputOptionDisplay>(buttons.size());
         for (ItemStack button : buttons) {
             if (button == null) continue;
@@ -68,10 +88,12 @@ public class CustomStonecutterMenu extends CustomContainerMenu {
             displays.add(new SingleInputOptionDisplay(input, display));
         }
 
-        // 1.21.2+ recipe declaration: empty itemSets (we don't override the
-        // ingredient sets) + our stonecutter list.
+        // A recipe declaration wholesale-replaces the client's recipe state, so the real
+        // item property sets (furnace inputs, smithing slots, ...) must be carried over
+        // to avoid degrading unrelated menus client-side.
+        var vanilla = PacketListener.getInstance().getVanillaRecipeData();
         var packet = new WrapperPlayServerDeclareRecipes(
-            Collections.emptyMap(),
+            vanilla != null ? vanilla.itemSets() : Collections.emptyMap(),
             displays
         );
         PacketListener.getInstance().injectOutgoing(player, packet);
@@ -86,14 +108,19 @@ public class CustomStonecutterMenu extends CustomContainerMenu {
         sendChangesToRemote(-1);
     }
 
-    private static MappedEntitySet<ItemType> allItemsInput() {
-        var items = new ArrayList<ItemType>();
-        for (ItemType type : ItemTypes.values()) {
-            if (type != ItemTypes.AIR) {
-                items.add(type);
+    private static synchronized MappedEntitySet<ItemType> getAllItemsInput() {
+        var input = allItemsInput;
+        if (input == null) {
+            var items = new ArrayList<ItemType>();
+            for (ItemType type : ItemTypes.values()) {
+                if (type != ItemTypes.AIR) {
+                    items.add(type);
+                }
             }
+            input = new MappedEntitySet<>(items);
+            allItemsInput = input;
         }
-        return new MappedEntitySet<>(items);
+        return input;
     }
 
     @Override
