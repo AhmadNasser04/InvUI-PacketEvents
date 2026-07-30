@@ -26,6 +26,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.HashOps;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.MenuType;
@@ -69,6 +70,11 @@ public abstract class CustomContainerMenu {
      * The slot number of the off-hand slot in the inventory menu.
      */
     private static final int OFF_HAND_SLOT = 45;
+    
+    /**
+     * The slot number of the helmet slot in the inventory, followed by the other armor slots.
+     */
+    private static final int HELMET_SLOT = 5;
     
     /**
      * The timeout for {@link #pendingPongs}, in ms.
@@ -148,6 +154,7 @@ public abstract class CustomContainerMenu {
     private final ItemStack[] items;
     private ItemStack carried = ItemStack.EMPTY;
     private final RemoteSlot.Synchronized[] remoteSlots;
+    private final RemoteSlot.Synchronized[] remoteArmor;
     private final RemoteSlot.Synchronized remoteCarried = remoteSlot(ItemStack.EMPTY);
     private final RemoteSlot.Synchronized remoteOffHand;
     protected final int[] dataSlots;
@@ -177,6 +184,9 @@ public abstract class CustomContainerMenu {
         this.items = ArrayUtils.newArray(ItemStack[]::new, size, ItemStack.EMPTY);
         this.remoteSlots = ArrayUtils.newArrayBy(RemoteSlot.Synchronized[]::new, size, _ -> remoteSlot(ItemStack.EMPTY));
         this.remoteOffHand = remoteSlot(serverPlayer.getOffhandItem());
+        
+        var armor = getPlayerArmor();
+        this.remoteArmor = ArrayUtils.newArrayBy(RemoteSlot.Synchronized[]::new, 4, i -> remoteSlot(armor[i]));
         
         int dataSize = InventoryUtils2.getDataSlotCountOf(menuType);
         this.dataSlots = new int[dataSize];
@@ -251,6 +261,21 @@ public abstract class CustomContainerMenu {
             }
         }
         
+        var armor = getPlayerArmor();
+        for (int i = 0; i < armor.length; i++) {
+            var item = armor[i];
+            var remoteSlot = remoteArmor[i];
+            if (!remoteSlot.matches(item)) {
+                packets.add(new ClientboundContainerSetSlotPacket(
+                    serverPlayer.inventoryMenu.containerId,
+                    serverPlayer.inventoryMenu.incrementStateId(),
+                    HELMET_SLOT + i,
+                    item
+                ));
+                remoteSlot.force(item);
+            }
+        }
+        
         var offHand = serverPlayer.getOffhandItem();
         if (!remoteOffHand.matches(offHand)) {
             packets.add(new ClientboundContainerSetSlotPacket(
@@ -280,6 +305,16 @@ public abstract class CustomContainerMenu {
         }
         
         PacketListener.getInstance().injectOutgoing(player, packets);
+    }
+    
+    private ItemStack[] getPlayerArmor() {
+        var equipment = serverPlayer.getInventory().equipment;
+        return new ItemStack[] {
+            equipment.get(EquipmentSlot.HEAD),
+            equipment.get(EquipmentSlot.CHEST),
+            equipment.get(EquipmentSlot.LEGS),
+            equipment.get(EquipmentSlot.FEET)
+        };
     }
     
     /**
@@ -321,7 +356,16 @@ public abstract class CustomContainerMenu {
             cursorVisualizer.apply(carried)
         ));
         
-        // off-hand
+        // inventory menu
+        var armor = getPlayerArmor();
+        for (int i = 0; i < armor.length; i++) {
+            packets.add(new ClientboundContainerSetSlotPacket(
+                serverPlayer.inventoryMenu.containerId,
+                serverPlayer.inventoryMenu.incrementStateId(),
+                HELMET_SLOT + i,
+                armor[i]
+            ));
+        }
         packets.add(new ClientboundContainerSetSlotPacket(
             serverPlayer.inventoryMenu.containerId,
             serverPlayer.inventoryMenu.incrementStateId(),
