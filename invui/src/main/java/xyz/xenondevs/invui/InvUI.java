@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.PluginDisableEvent;
+import org.bukkit.event.server.ServerLoadEvent;
 import org.bukkit.plugin.Plugin;
 import org.jspecify.annotations.Nullable;
 
@@ -33,6 +34,8 @@ public final class InvUI implements Listener {
     
     private final List<Runnable> disableHandlers = new ArrayList<>();
     private @Nullable Plugin plugin;
+    private boolean packetEventsPending;
+    private @Nullable Throwable packetEventsFailure;
     private BiConsumer<? super String, ? super Throwable> exceptionHandler = (msg, e) -> getPlugin().getComponentLogger().error(msg, e);
     private boolean fireBukkitInventoryEvents = true;
     
@@ -97,30 +100,54 @@ public final class InvUI implements Listener {
 
         Bukkit.getPluginManager().registerEvents(this, plugin);
         this.plugin = plugin;
-        verifyPacketEventsPresent(plugin);
+        verifyPacketEventsPresent();
     }
 
     /**
      * Verifies that the PacketEvents plugin is installed and initialized. InvUI does not
      * bootstrap its own PacketEvents instance — the plugin is a hard runtime requirement,
      * and window features will not function without it.
+     * <p>
+     * PacketEvents initializes during its own enable, which runs after plugins that enable at
+     * startup, so an uninitialized API here is not yet a failure. The verdict is deferred to
+     * {@link ServerLoadEvent}; a plugin enabled after that point sees an initialized API and
+     * reports immediately.
      */
+    private void verifyPacketEventsPresent() {
+        packetEventsPending = !packetEventsInitialized();
+    }
+
     @SuppressWarnings("ConstantValue") // PacketEvents.getAPI() can return null until setAPI() is called
-    private void verifyPacketEventsPresent(Plugin plugin) {
+    private boolean packetEventsInitialized() {
         try {
             var api = PacketEvents.getAPI();
-            if (api == null || !api.isInitialized()) {
-                plugin.getComponentLogger().error(
-                    "InvUI requires the PacketEvents plugin to be installed and enabled "
-                        + "(https://modrinth.com/plugin/packetevents). InvUI windows will not function without it."
-                );
-            }
+            packetEventsFailure = null;
+            return api != null && api.isInitialized();
         } catch (Throwable t) {
-            plugin.getComponentLogger().error(
-                "InvUI requires the PacketEvents plugin to be installed and enabled "
-                    + "(https://modrinth.com/plugin/packetevents). InvUI windows will not function without it.",
-                t
-            );
+            packetEventsFailure = t;
+            return false;
+        }
+    }
+
+    private void reportPacketEventsMissing(Plugin plugin) {
+        String message = "InvUI requires the PacketEvents plugin to be installed and enabled "
+            + "(https://modrinth.com/plugin/packetevents). InvUI windows will not function without it.";
+
+        if (packetEventsFailure != null) {
+            plugin.getComponentLogger().error(message, packetEventsFailure);
+        } else {
+            plugin.getComponentLogger().error(message);
+        }
+    }
+
+    @EventHandler
+    private void handleServerLoad(ServerLoadEvent event) {
+        if (!packetEventsPending)
+            return;
+
+        packetEventsPending = false;
+        if (!packetEventsInitialized()) {
+            reportPacketEventsMissing(getPlugin());
         }
     }
     
