@@ -5,6 +5,7 @@ package xyz.xenondevs.invui.dsl
 import org.bukkit.entity.Player
 import org.bukkit.event.inventory.ClickType
 import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.dsl.ProviderDslProperty
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.Click
 import xyz.xenondevs.invui.ExperimentalReactiveApi
@@ -57,7 +58,6 @@ inline fun item(item: ItemDsl.() -> Unit): Item {
  * }
  * ```
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface ClickDsl {
     
@@ -76,7 +76,6 @@ sealed interface ClickDsl {
  * DSL scope available inside [ItemDsl.onBundleSelect] handlers, providing information about
  * a bundle slot selection event.
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface BundleSelectDsl {
     
@@ -106,7 +105,6 @@ sealed interface BundleSelectDsl {
  * }
  * ```
  */
-@ItemDslMarker
 @ExperimentalDslApi
 sealed interface ItemDsl {
     

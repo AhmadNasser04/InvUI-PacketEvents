@@ -5,6 +5,7 @@ package xyz.xenondevs.invui.dsl
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.dsl.ProviderDslProperty
 import xyz.xenondevs.commons.provider.mutableProvider
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.ExperimentalReactiveApi
@@ -196,7 +197,6 @@ sealed interface MerchantWindowDsl : SplitWindowDsl {
  * ```
  */
 @ExperimentalDslApi
-@TradeDslMarker
 sealed interface TradeDsl {
     
     /**

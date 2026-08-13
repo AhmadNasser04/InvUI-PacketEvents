@@ -33,7 +33,7 @@ across supported Minecraft versions without per-version compilation.
 
 | Minecraft version    | InvUI version     |
 |----------------------|-------------------|
-| `26.2`               | `2.2.x`           |
+| `26.2`               | `2.2.0` - `2.3.x` |
 | `26.1.2`             | `2.0.0` - `2.1.x` |
 | `1.14.0` - `1.21.11` | `1.49`            |
 

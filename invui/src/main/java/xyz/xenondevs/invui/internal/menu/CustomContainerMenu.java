@@ -685,7 +685,7 @@ public abstract class CustomContainerMenu {
             handlePong(pong);
             return UpdateType.NONE;
         }
-        throw new UnsupportedOperationException("Unknown packet wrapper: " + packet.getClass().getName());
+        return UpdateType.NONE;
     }
 
     private void handlePong(WrapperPlayClientPong packet) {

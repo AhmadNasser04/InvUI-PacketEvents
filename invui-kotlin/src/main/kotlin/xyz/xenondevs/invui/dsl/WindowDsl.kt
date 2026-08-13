@@ -8,6 +8,8 @@ import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.inventory.ItemStack
 import xyz.xenondevs.commons.provider.Provider
+import xyz.xenondevs.commons.provider.dsl.MutableProviderDslProperty
+import xyz.xenondevs.commons.provider.dsl.ProviderDslProperty
 import xyz.xenondevs.commons.provider.mutableProvider
 import xyz.xenondevs.commons.provider.provider
 import xyz.xenondevs.invui.ClickEvent
@@ -93,7 +95,6 @@ inline fun mergedWindow(viewer: Player, window: NormalMergedWindowDsl.() -> Unit
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface WindowOpenDsl
 
@@ -108,7 +109,6 @@ interface WindowOpenDsl
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface WindowCloseDsl {
     
@@ -128,7 +128,6 @@ interface WindowCloseDsl {
  * }
  * ```
  */
-@WindowDslMarker
 @ExperimentalDslApi
 interface WindowOutsideClickDsl {
     
@@ -166,7 +165,6 @@ interface WindowOutsideClickDsl {
  * ```
  */
 @ExperimentalDslApi
-@WindowDslMarker
 sealed interface WindowDsl {
     
     /** The player viewing this window. */
