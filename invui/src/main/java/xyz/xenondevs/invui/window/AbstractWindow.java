@@ -644,7 +644,14 @@ non-sealed abstract class AbstractWindow<M extends CustomContainerMenu> implemen
         if (tickTask != null)
             tickTask.cancel();
         unregisterAsViewer();
-        menu.handleClosed(cause);
+        // Menu cleanup must never strand the viewer: everything below returns the
+        // player's held cursor item and fires the close handlers, so a failure here
+        // is reported rather than propagated.
+        try {
+            menu.handleClosed(cause);
+        } catch (Throwable t) {
+            InvUI.getInstance().handleException("Failed to clean up menu on close", t);
+        }
         isOpen = false;
 
         // The packet-based menu has no server-side container, so Bukkit's close event has
