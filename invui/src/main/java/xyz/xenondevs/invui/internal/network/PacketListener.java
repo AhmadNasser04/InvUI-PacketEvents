@@ -112,7 +112,10 @@ public class PacketListener implements Listener {
     }
 
     public void stopDiscard(Player player, PacketTypeCommon type) {
-        getState(player.getUniqueId()).discards.remove(type);
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) return;
+
+        state.discards.remove(type);
     }
 
     /**
@@ -125,7 +128,10 @@ public class PacketListener implements Listener {
     }
 
     public void removeOutgoingFilter(Player player, PacketTypeCommon type) {
-        getState(player.getUniqueId()).filters.remove(type);
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) return;
+
+        state.filters.remove(type);
     }
 
     public void injectOutgoing(Player player, Supplier<? extends List<? extends PacketWrapper<?>>> wrapperSupplier) {
@@ -211,7 +217,10 @@ public class PacketListener implements Listener {
     }
 
     public boolean removeRedirect(Player player, PacketTypeCommon type) {
-        return getState(player.getUniqueId()).redirects.remove(type) != null;
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) return false;
+
+        return state.redirects.remove(type) != null;
     }
 
     public <T extends PacketWrapper<?>> void listenIncoming(
@@ -224,7 +233,10 @@ public class PacketListener implements Listener {
     }
 
     public boolean stopListening(Player player, PacketTypeCommon type) {
-        return getState(player.getUniqueId()).listeners.remove(type) != null;
+        PlayerState state = states.get(player.getUniqueId());
+        if (state == null) return false;
+
+        return state.listeners.remove(type) != null;
     }
 
     private PlayerState getState(UUID uuid) {
