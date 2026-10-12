@@ -2,7 +2,7 @@
 kotlin = "2.3.10"
 paper = "26.3.build.+"
 testpaper = "1.21.11-R0.1-SNAPSHOT"
-packetevents = "2.12.0"
+packetevents = "2.14.0"
 
 [libraries]
 commons-provider = { module = "xyz.xenondevs.commons:commons-provider-dsl", version = "2.0.0-alpha.11" }
