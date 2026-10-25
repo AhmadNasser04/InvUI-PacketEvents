@@ -163,9 +163,10 @@ public sealed interface SlotElement {
         @Override
         public @Nullable ItemStack getItemStack(Player player) {
             var locale = Languages.getInstance().getLocale(player);
-            
+            var itemStack = inventory.getItem(slot);
+
             // 1. try visualizer on SlotElement level
-            var slotVisualization = FuncUtils.applySafely(visualizer, inventory.getItem(slot), null);
+            var slotVisualization = FuncUtils.applySafely(visualizer, itemStack, null);
             if (slotVisualization != null)
                 return slotVisualization.get(locale);
             
@@ -175,7 +176,6 @@ public sealed interface SlotElement {
                 return invVisualization.get(locale);
             
             // 3. use actual item stack on slot, if present
-            var itemStack = inventory.getItem(slot);
             if (itemStack != null)
                 return itemStack;
             

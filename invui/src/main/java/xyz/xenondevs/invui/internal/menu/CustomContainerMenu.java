@@ -274,8 +274,11 @@ public abstract class CustomContainerMenu {
 
         for (int i = 0; i < size; i++) {
             var current = bukkitItems[i];
-            if (!dirtySlots.get(i) && Objects.equals(lastSentItems[i], current))
+            if (!dirtySlots.get(i) && Objects.equals(lastSentItems[i], current)) {
+                // equal but not identical components compare deeply every tick until the reference is refreshed
+                lastSentItems[i] = current;
                 continue;
+            }
             slotStateIds[dirtyCount] = incrementStateId();
             slotIndices[dirtyCount] = i;
             slotSnapshots[dirtyCount] = current;
