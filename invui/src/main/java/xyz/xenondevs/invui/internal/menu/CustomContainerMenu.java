@@ -656,7 +656,8 @@ public abstract class CustomContainerMenu {
     public UpdateType processIncoming() {
         PacketWrapper<?> packet;
         UpdateType updateType = UpdateType.NONE;
-        while ((packet = incoming.poll()) != null) {
+        // A click can replace this window mid-drain; packets queued behind it belong to a dead window.
+        while (getWindow().isOpen() && (packet = incoming.poll()) != null) {
             updateType = updateType.or(processPacket(packet));
         }
         return updateType;
